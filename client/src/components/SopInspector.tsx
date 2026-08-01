@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, AlertTriangle, History, Clock, ChevronDown, ChevronUp } from "lucide-react";
-import type { Sop, SopVersion } from "@/lib/sops";
+import { X, ShieldCheck, AlertTriangle, History, Clock, ChevronDown, ChevronUp, ShieldAlert } from "lucide-react";
+import type { Sop, SopVersion, RiskLevel } from "@/lib/sops";
 import { fetchVersions } from "@/lib/sops";
 import { StatusPill } from "./SopCard";
+
+const RISK_TINT: Record<RiskLevel, string> = {
+  Low: "text-emerald border-emerald/30 bg-emerald/10",
+  Medium: "text-cyan border-cyan/30 bg-cyan/10",
+  High: "text-amber border-amber/30 bg-amber/10",
+  Critical: "text-rose-400 border-rose-500/30 bg-rose-500/10",
+};
 
 export function SopInspector({
   sop,
@@ -36,11 +43,11 @@ export function SopInspector({
   if (!sop) return null;
 
   const REASON_LABELS: Record<string, string> = {
-    initial_extraction: "Created from thread",
-    manual_edit: "Edited by user",
-    approval: "Approved for MCP",
+    initial_extraction: "Created from source thread",
+    manual_edit: "Edited by team lead",
+    approval: "Approved for FastMCP",
     re_extraction: "Re-extracted from source",
-    conflict_resolution: "Conflict resolved",
+    conflict_resolution: "Conflict/Duplicate resolved",
   };
 
   return (
@@ -52,9 +59,13 @@ export function SopInspector({
       <div className="glass-panel relative flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-[28px] duration-500 ease-out animate-in fade-in zoom-in-95">
         <header className="flex items-start justify-between gap-4 border-b border-white/10 p-6">
           <div className="space-y-2.5">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-indigo/30 bg-indigo/10 px-2.5 py-1 text-[11px] font-medium text-indigo">
                 {sop.category}
+              </span>
+              <span className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase ${RISK_TINT[sop.riskLevel || "Low"]}`}>
+                {sop.requiresHumanGate && <ShieldAlert className="h-3 w-3" />}
+                {sop.riskLevel || "Low"} Risk
               </span>
               <StatusPill status={sop.status} />
               {sop.isStale && (
@@ -86,6 +97,17 @@ export function SopInspector({
         </header>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-6">
+          {sop.requiresHumanGate && (
+            <div className="rounded-2xl border border-amber/30 bg-amber/10 p-3.5 text-[12.5px] text-amber">
+              <p className="font-semibold flex items-center gap-1.5">
+                <ShieldAlert className="h-4 w-4" /> Real-Time Execution Guardrail Active
+              </p>
+              <p className="mt-1 text-[12px] text-amber/90">
+                Because this procedure carries <strong>{sop.riskLevel} Risk</strong>, autonomous agents in low-trust roles are automatically gated and must submit a real-time execution approval request before performing these actions.
+              </p>
+            </div>
+          )}
+
           {/* Execution Steps */}
           {sop.steps.map((step, i) => (
             <div
@@ -133,7 +155,7 @@ export function SopInspector({
                 className="flex w-full items-center gap-2 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-left text-[12px] font-medium text-muted-foreground transition-colors hover:bg-white/[0.06]"
               >
                 <History className="h-3.5 w-3.5" />
-                Version History ({versions.length})
+                Version Audit History ({versions.length})
                 {showVersions ? <ChevronUp className="ml-auto h-3 w-3" /> : <ChevronDown className="ml-auto h-3 w-3" />}
               </button>
               {showVersions && (

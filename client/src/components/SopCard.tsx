@@ -1,5 +1,5 @@
-import type { Sop } from "@/lib/sops";
-import { ChevronRight, ShieldCheck, AlertTriangle, History } from "lucide-react";
+import type { Sop, RiskLevel } from "@/lib/sops";
+import { ChevronRight, ShieldCheck, AlertTriangle, History, ShieldAlert } from "lucide-react";
 
 const CATEGORY_TINT: Record<string, string> = {
   Engineering: "text-cyan border-cyan/30 bg-cyan/10",
@@ -7,6 +7,13 @@ const CATEGORY_TINT: Record<string, string> = {
   Billing: "text-violet border-violet/30 bg-violet/10",
   Operations: "text-cyan border-cyan/25 bg-cyan/[0.07]",
   Security: "text-violet border-violet/30 bg-violet/10",
+};
+
+const RISK_TINT: Record<RiskLevel, string> = {
+  Low: "text-emerald border-emerald/30 bg-emerald/10",
+  Medium: "text-cyan border-cyan/30 bg-cyan/10",
+  High: "text-amber border-amber/30 bg-amber/10",
+  Critical: "text-rose-400 border-rose-500/30 bg-rose-500/10",
 };
 
 export function StatusPill({ status }: { status: Sop["status"] }) {
@@ -42,7 +49,7 @@ export function SopCard({
   return (
     <article className="glass-card glass-card-hover flex flex-col gap-4 rounded-3xl p-5">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span
             className={[
               "rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide backdrop-blur-xl",
@@ -50,6 +57,15 @@ export function SopCard({
             ].join(" ")}
           >
             {sop.category}
+          </span>
+          <span
+            className={[
+              "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase",
+              RISK_TINT[sop.riskLevel || "Low"],
+            ].join(" ")}
+          >
+            {sop.requiresHumanGate && <ShieldAlert className="h-2.5 w-2.5" />}
+            {sop.riskLevel || "Low"} Risk
           </span>
           {sop.version > 1 && (
             <span className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -84,6 +100,12 @@ export function SopCard({
           {sop.trigger}
         </code>
       </div>
+
+      {sop.requiresHumanGate && (
+        <p className="flex items-center gap-1.5 text-[11px] text-amber">
+          <ShieldAlert className="h-3 w-3" /> Execution Gate: Human approval required before low-trust agent execution.
+        </p>
+      )}
 
       <div className="mt-auto flex gap-2 pt-1">
         <button

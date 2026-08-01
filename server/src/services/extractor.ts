@@ -5,6 +5,8 @@ dotenv.config();
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical';
+
 export interface SOPStep {
   step_number: number;
   action: string;
@@ -22,18 +24,27 @@ export interface ExtractedSOP {
   trigger_condition: string;
   preconditions: string[];
   execution_steps: SOPStep[];
+  risk_level: RiskLevel;
+  requires_human_gate: boolean;
 }
 
 const SYSTEM_PROMPT = `
-You are an expert Enterprise Knowledge Engineer. Your job is to analyze noisy team communication transcripts (from Slack, Linear, or GitHub) and determine if a concrete, repeatable Standard Operating Procedure (SOP) or Operational Decision Rule was established.
+You are an expert Enterprise Knowledge Engineer. Your job is to analyze noisy team communications or tacit knowledge dictation (from Slack, GitHub, Linear, Zendesk, Email, Database Runbooks, or Direct Teach) and determine if a concrete, repeatable Standard Operating Procedure (SOP) was established.
+
+### Risk Level & Safety Governance Rules:
+- **Low Risk**: Pure read actions, logging, internal Slack posts (e.g., query status in Postgres, post message to #general).
+- **Medium Risk**: Soft operational updates, low-value retry scheduling (e.g., retry failed invoice under $1000).
+- **High Risk**: Direct database mutations, contract tier overrides, revoking keys, refunds > $500, modifying production infra.
+- **Critical Risk**: Secret rotation, revoking admin credentials, bulk data deletion, financial overrides > $10,000.
+
+If risk_level is "High" or "Critical", set "requires_human_gate" to true.
 
 ### Instructions:
 1. Ignore casual banter, greetings, chit-chat, and irrelevant side conversations.
-2. Focus ONLY on actionable problem-solving patterns, step-by-step procedures, or explicit decision rules confirmed by a senior team member.
-3. If no operational procedure or rule is clearly defined in the transcript, set "is_valid_sop" to false.
-4. For each execution step, extract the conditional logic (when this step applies) and failure handling (what to do if this step fails).
-5. Extract specific parameters, thresholds, and configuration values mentioned in the conversation.
-6. Output MUST be strictly raw JSON adhering to the required structure. Do NOT wrap in markdown code blocks like \`\`\`json.
+2. Focus ONLY on actionable problem-solving patterns, step-by-step procedures, or explicit decision rules.
+3. If the input is an explicit tacit knowledge dictation or decree (e.g. "EXPLICIT OPERATIONAL SOP DECREE" or explicit step dictation), set "is_valid_sop" to true and "confidence_score" to 0.95.
+4. If no operational procedure or rule is defined, set "is_valid_sop" to false.
+5. Output MUST be strictly raw JSON adhering to the required structure. Do NOT wrap in markdown code blocks like \`\`\`json.
 `;
 
 export async function extractSOPFromThread(
@@ -44,7 +55,7 @@ export async function extractSOPFromThread(
       .map((msg) => `[${msg.user}]: ${msg.text}`)
       .join('\n');
 
-    const userPrompt = `Analyze this thread transcript and extract an SOP object if a clear procedure exists:\n\n${formattedTranscript}\n\nReturn JSON output matching this schema:
+    const userPrompt = `Analyze this transcript/dictation and extract an SOP object if a clear procedure exists:\n\n${formattedTranscript}\n\nReturn JSON output matching this schema:
 {
   "is_valid_sop": boolean,
   "confidence_score": number between 0 and 1,
@@ -56,12 +67,14 @@ export async function extractSOPFromThread(
     {
       "step_number": number,
       "action": string describing what to do,
-      "target_system": string (e.g. "Stripe", "Slack", "Postgres", "Admin CLI"),
+      "target_system": string (e.g. "Stripe", "Slack", "Postgres", "Admin CLI", "Vault", "Zendesk"),
       "parameters": object with specific values/thresholds extracted from the conversation,
-      "condition": string or null — when this specific step applies (e.g. "if ARR > 25k"),
+      "condition": string or null — when this specific step applies,
       "on_failure": string or null — fallback action if this step fails
     }
-  ]
+  ],
+  "risk_level": "Low" | "Medium" | "High" | "Critical",
+  "requires_human_gate": boolean
 }`;
 
     const response = await fetch(OPENROUTER_BASE_URL, {
@@ -95,10 +108,15 @@ export async function extractSOPFromThread(
       throw new Error('Empty response from OpenRouter.');
     }
 
-    // Strip markdown code fences if the model wraps the response
     const cleanJson = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
     console.log('[Extractor] Raw LLM output:', cleanJson.substring(0, 500));
     const parsedData: ExtractedSOP = JSON.parse(cleanJson);
+
+    // Fallback defaults for safety fields if model omitted them
+    if (!parsedData.risk_level) parsedData.risk_level = 'Low';
+    if (parsedData.requires_human_gate === undefined) {
+      parsedData.requires_human_gate = parsedData.risk_level === 'High' || parsedData.risk_level === 'Critical';
+    }
 
     console.log('[Extractor] OpenRouter response:', JSON.stringify(parsedData, null, 2));
 

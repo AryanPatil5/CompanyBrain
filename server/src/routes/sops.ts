@@ -29,14 +29,68 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// ─── GET pending agent approvals ─────────────────────────────
+
+router.get('/approvals', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const { data, error } = await supabase
+      .from('pending_approvals')
+      .select('*, skills_sops(title, category, trigger_condition, execution_steps)')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+
+    res.json({ approvals: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch pending approvals' });
+  }
+});
+
+// ─── PATCH resolve approval (Approve or Reject) ──────────────
+
+router.patch('/approvals/:approvalId', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { approvalId } = req.params;
+    const { status, reason } = req.body; // 'approved' or 'rejected'
+
+    if (!['approved', 'rejected'].includes(status)) {
+      res.status(400).json({ error: 'Status must be "approved" or "rejected"' });
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('pending_approvals')
+      .update({
+        status,
+        reason: reason || `Resolved by manager`,
+        resolved_at: new Date().toISOString(),
+      })
+      .eq('id', approvalId)
+      .select()
+      .single();
+
+    if (error) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+
+    res.json({ message: `Agent execution ${status}`, approval: data });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to resolve approval' });
+  }
+});
+
 // ─── GET analytics ───────────────────────────────────────────
 
 router.get('/analytics', async (_req: Request, res: Response): Promise<void> => {
   try {
-    // Fetch all SOPs
     const { data: sops, error: sopErr } = await supabase
       .from('skills_sops')
-      .select('id, title, status, category, is_stale');
+      .select('id, title, status, category, is_stale, risk_level');
 
     if (sopErr) {
       res.status(500).json({ error: sopErr.message });
@@ -46,18 +100,24 @@ router.get('/analytics', async (_req: Request, res: Response): Promise<void> => 
     const allSops = sops || [];
     const total = allSops.length;
 
-    // Count by status
     const byStatus: Record<string, number> = {};
     const byCategory: Record<string, number> = {};
+    const byRisk: Record<string, number> = {};
     let staleCount = 0;
 
     for (const s of allSops) {
       byStatus[s.status] = (byStatus[s.status] || 0) + 1;
       byCategory[s.category] = (byCategory[s.category] || 0) + 1;
+      byRisk[s.risk_level || 'Low'] = (byRisk[s.risk_level || 'Low'] || 0) + 1;
       if (s.is_stale) staleCount++;
     }
 
-    // Recent execution count (last 7 days)
+    // Pending agent execution approvals count
+    const { count: pendingApprovalsCount } = await supabase
+      .from('pending_approvals')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending');
+
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
@@ -66,31 +126,6 @@ router.get('/analytics', async (_req: Request, res: Response): Promise<void> => 
       .select('id', { count: 'exact', head: true })
       .gte('created_at', weekAgo.toISOString());
 
-    // Top executed SOPs (last 30 days)
-    const monthAgo = new Date();
-    monthAgo.setDate(monthAgo.getDate() - 30);
-
-    const { data: logs } = await supabase
-      .from('execution_logs')
-      .select('sop_id')
-      .gte('created_at', monthAgo.toISOString());
-
-    const execCounts: Record<string, number> = {};
-    for (const log of logs || []) {
-      if (log.sop_id) {
-        execCounts[log.sop_id] = (execCounts[log.sop_id] || 0) + 1;
-      }
-    }
-
-    const topExecuted = Object.entries(execCounts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-      .map(([sop_id, count]) => {
-        const sop = allSops.find((s) => s.id === sop_id);
-        return { sop_id, title: sop?.title || 'Unknown', count };
-      });
-
-    // Source breakdown from raw_threads
     const { data: threads } = await supabase
       .from('raw_threads')
       .select('source');
@@ -104,9 +139,10 @@ router.get('/analytics', async (_req: Request, res: Response): Promise<void> => 
       total_sops: total,
       by_status: byStatus,
       by_category: byCategory,
+      by_risk: byRisk,
       stale_count: staleCount,
+      pending_approvals_count: pendingApprovalsCount || 0,
       recent_executions: recentExecutions || 0,
-      top_executed: topExecuted,
       sources_ingested: bySources,
     });
   } catch (err) {
@@ -120,9 +156,8 @@ router.get('/analytics', async (_req: Request, res: Response): Promise<void> => 
 router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { title, category, trigger_condition, preconditions, execution_steps, status } = req.body;
+    const { title, category, trigger_condition, preconditions, execution_steps, status, risk_level, requires_human_gate } = req.body;
 
-    // Create a version snapshot before modifying
     const isApproval = status === 'Approved';
     await createVersion(id, 'user', isApproval ? 'approval' : 'manual_edit');
 
@@ -133,8 +168,9 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
     if (preconditions !== undefined) updatePayload.preconditions = preconditions;
     if (execution_steps !== undefined) updatePayload.execution_steps = execution_steps;
     if (status !== undefined) updatePayload.status = status;
+    if (risk_level !== undefined) updatePayload.risk_level = risk_level;
+    if (requires_human_gate !== undefined) updatePayload.requires_human_gate = requires_human_gate;
 
-    // Approving also confirms freshness
     if (isApproval) {
       updatePayload.last_confirmed_at = new Date().toISOString();
       updatePayload.is_stale = false;

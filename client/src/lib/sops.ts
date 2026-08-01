@@ -1,4 +1,5 @@
 export type SopStatus = "draft" | "approved";
+export type RiskLevel = "Low" | "Medium" | "High" | "Critical";
 
 export interface SopStep {
   instruction: string;
@@ -19,15 +20,34 @@ export interface Sop {
   version: number;
   lastConfirmedAt: string;
   isStale: boolean;
+  riskLevel: RiskLevel;
+  requiresHumanGate: boolean;
+}
+
+export interface PendingApproval {
+  id: string;
+  sop_id: string;
+  agent_id: string;
+  requested_by: string;
+  risk_level: RiskLevel;
+  status: "pending" | "approved" | "rejected";
+  reason: string;
+  created_at: string;
+  skills_sops?: {
+    title: string;
+    category: string;
+    trigger_condition: string;
+  };
 }
 
 export interface Analytics {
   total_sops: number;
   by_status: Record<string, number>;
   by_category: Record<string, number>;
+  by_risk: Record<string, number>;
   stale_count: number;
+  pending_approvals_count: number;
   recent_executions: number;
-  top_executed: Array<{ sop_id: string; title: string; count: number }>;
   sources_ingested: Record<string, number>;
 }
 
@@ -82,10 +102,11 @@ export const MOCK_SOPS: Sop[] = [
     version: 1,
     lastConfirmedAt: new Date().toISOString(),
     isStale: false,
+    riskLevel: "High",
+    requiresHumanGate: true,
   },
 ];
 
-// Helper to normalize backend Supabase records to frontend Sop interface
 function mapBackendSopToFrontend(raw: any): Sop {
   return {
     id: raw.id,
@@ -108,12 +129,11 @@ function mapBackendSopToFrontend(raw: any): Sop {
     version: raw.version || 1,
     lastConfirmedAt: raw.last_confirmed_at || new Date().toISOString(),
     isStale: raw.is_stale || false,
+    riskLevel: (raw.risk_level || "Low") as RiskLevel,
+    requiresHumanGate: raw.requires_human_gate || false,
   };
 }
 
-/**
- * Fetches SOPs from Express backend running on http://localhost:5001
- */
 export async function fetchSops(): Promise<{ sops: Sop[]; live: boolean }> {
   try {
     const controller = new AbortController();
@@ -129,21 +149,17 @@ export async function fetchSops(): Promise<{ sops: Sop[]; live: boolean }> {
     const rawList = Array.isArray(data) ? data : data?.sops ?? [];
 
     if (!rawList.length) {
-      console.warn("Backend connected but table is empty. Using fallback mock data.");
       return { sops: MOCK_SOPS, live: true };
     }
 
     const mappedList = rawList.map(mapBackendSopToFrontend);
     return { sops: mappedList, live: true };
   } catch (error) {
-    console.warn("Express backend offline or unreachable:", error);
+    console.warn("Express backend offline:", error);
     return { sops: MOCK_SOPS, live: false };
   }
 }
 
-/**
- * Approves an SOP by updating status in Supabase backend
- */
 export async function approveSopApi(id: string): Promise<boolean> {
   try {
     const res = await fetch(`http://localhost:5001/api/sops/${id}`, {
@@ -151,17 +167,13 @@ export async function approveSopApi(id: string): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "Approved" }),
     });
-
     return res.ok;
   } catch (err) {
-    console.error("Failed to persist approval to backend:", err);
+    console.error("Failed to persist approval:", err);
     return false;
   }
 }
 
-/**
- * Confirms an SOP is still current (resets staleness)
- */
 export async function confirmSopApi(id: string): Promise<boolean> {
   try {
     const res = await fetch(`http://localhost:5001/api/sops/${id}/confirm`, {
@@ -174,9 +186,6 @@ export async function confirmSopApi(id: string): Promise<boolean> {
   }
 }
 
-/**
- * Fetches analytics data from the backend
- */
 export async function fetchAnalytics(): Promise<Analytics | null> {
   try {
     const controller = new AbortController();
@@ -193,9 +202,6 @@ export async function fetchAnalytics(): Promise<Analytics | null> {
   }
 }
 
-/**
- * Fetches version history for an SOP
- */
 export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
   try {
     const res = await fetch(`http://localhost:5001/api/sops/${sopId}/versions`);
@@ -204,5 +210,52 @@ export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
     return data.versions || [];
   } catch {
     return [];
+  }
+}
+
+export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
+  try {
+    const res = await fetch("http://localhost:5001/api/sops/approvals");
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.approvals || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function resolveApprovalApi(approvalId: string, status: "approved" | "rejected"): Promise<boolean> {
+  try {
+    const res = await fetch(`http://localhost:5001/api/sops/approvals/${approvalId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function teachBrainApi(payload: {
+  title: string;
+  category: string;
+  description: string;
+  steps: string[];
+  author?: string;
+}): Promise<boolean> {
+  try {
+    const res = await fetch("http://localhost:5001/api/ingestion/webhook/teach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workspace_id: "00000000-0000-0000-0000-000000000000",
+        ...payload,
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("Teach Brain error:", err);
+    return false;
   }
 }

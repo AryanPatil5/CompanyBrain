@@ -1,4 +1,4 @@
-import { Brain, Boxes, Network, Plug } from "lucide-react";
+import { Brain, Boxes, Network, Plug, Sparkles } from "lucide-react";
 
 const NAV = [
   { label: "Skills Library", icon: Boxes },
@@ -6,7 +6,7 @@ const NAV = [
   { label: "Integrations", icon: Plug },
 ];
 
-export function GlassSidebar() {
+export function GlassSidebar({ onTeachClick }: { onTeachClick?: () => void }) {
   return (
     <aside className="glass-panel hidden w-64 shrink-0 flex-col rounded-3xl p-4 lg:flex">
       <div className="flex items-center gap-3 px-2 py-3">
@@ -42,13 +42,26 @@ export function GlassSidebar() {
         })}
       </nav>
 
+      {onTeachClick && (
+        <div className="mt-4 px-1">
+          <button
+            type="button"
+            onClick={onTeachClick}
+            className="specular flex w-full items-center justify-center gap-2 rounded-2xl border border-indigo/40 bg-gradient-to-b from-indigo/80 to-primary/60 px-3 py-2.5 text-[13px] font-medium text-primary-foreground shadow-[0_0_20px_-4px_var(--indigo)] transition-transform hover:-translate-y-0.5"
+          >
+            <Sparkles className="h-4 w-4" />
+            Teach the Brain
+          </button>
+        </div>
+      )}
+
       <div className="mt-auto rounded-2xl border border-white/10 bg-white/[0.03] p-3">
         <p className="text-[11px] tracking-wide text-muted-foreground uppercase">
           Engine status
         </p>
         <p className="mt-1.5 flex items-center gap-2 text-[13px]">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald shadow-[0_0_10px_2px_var(--emerald)]" />
-          Indexing nominal
+          Guardrails active
         </p>
       </div>
     </aside>
