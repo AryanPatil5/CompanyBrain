@@ -21,14 +21,14 @@ export function StatusPill({ status }: { status: Sop["status"] }) {
   return (
     <span
       className={[
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide backdrop-blur-xl",
+        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium tracking-wide backdrop-blur-xl",
         approved
           ? "border-[#10b981]/30 bg-[#10b981]/10 text-[#059669]"
           : "border-[#f59e0b]/30 bg-[#f59e0b]/10 text-[#d97706]",
       ].join(" ")}
     >
       <span
-        className={`h-1.5 w-1.5 rounded-full ${approved ? "bg-[#10b981] shadow-[0_0_6px_rgba(16,185,129,0.5)]" : "bg-[#f59e0b] shadow-[0_0_6px_rgba(245,158,11,0.5)]"}`}
+        className={`h-1.5 w-1.5 rounded-sm ${approved ? "bg-[#10b981]" : "bg-[#f59e0b]"}`}
       />
       {approved ? "Approved" : "Draft"}
     </span>
@@ -47,12 +47,12 @@ export function SopCard({
   onConfirm?: () => void;
 }) {
   return (
-    <article className="glass-card glass-card-hover flex flex-col gap-4 rounded-[20px] p-5">
+    <article className="glass-card glass-card-hover flex flex-col gap-4 rounded-lg p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span
             className={[
-              "rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-wide backdrop-blur-xl",
+              "rounded-md border px-2.5 py-1 text-[11px] font-medium tracking-wide backdrop-blur-xl",
               CATEGORY_TINT[sop.category] ?? "text-[#4f46e5] border-[#6366f1]/20 bg-[#6366f1]/[0.08]",
             ].join(" ")}
           >
@@ -60,7 +60,7 @@ export function SopCard({
           </span>
           <span
             className={[
-              "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase",
+              "flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold tracking-wider uppercase",
               RISK_TINT[sop.riskLevel || "Low"],
             ].join(" ")}
           >
@@ -68,7 +68,7 @@ export function SopCard({
             {sop.riskLevel || "Low"} Risk
           </span>
           {sop.version > 1 && (
-            <span className="flex items-center gap-1 rounded-full border border-black/[0.08] bg-black/[0.03] px-2 py-0.5 text-[10px] font-medium text-[#6e6e73]">
+            <span className="flex items-center gap-1 rounded-md border border-black/[0.08] bg-black/[0.03] px-2 py-0.5 text-[10px] font-medium text-[#6e6e73]">
               <History className="h-2.5 w-2.5" />
               v{sop.version}
             </span>
@@ -76,7 +76,7 @@ export function SopCard({
         </div>
         <div className="flex items-center gap-1.5">
           {sop.isStale && (
-            <span className="flex items-center gap-1 rounded-full border border-[#f59e0b]/30 bg-[#f59e0b]/10 px-2 py-0.5 text-[10px] font-medium text-[#d97706]">
+            <span className="flex items-center gap-1 rounded-md border border-[#f59e0b]/30 bg-[#f59e0b]/10 px-2 py-0.5 text-[10px] font-medium text-[#d97706]">
               <AlertTriangle className="h-2.5 w-2.5" />
               Stale
             </span>
@@ -92,7 +92,7 @@ export function SopCard({
         </p>
       </div>
 
-      <div className="rounded-xl border border-[#0284c7]/15 bg-[#0284c7]/[0.06] p-3">
+      <div className="rounded-lg border border-[#0284c7]/15 bg-[#0284c7]/[0.06] p-3">
         <p className="text-[10px] tracking-[0.12em] font-medium text-[#6e6e73] uppercase">
           Trigger condition
         </p>
@@ -111,7 +111,7 @@ export function SopCard({
         <button
           type="button"
           onClick={onInspect}
-          className="glass-button flex h-11 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-2xl px-5 text-[13px] font-medium active:scale-95"
+          className="glass-button flex h-11 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-lg px-5 text-[13px] font-medium active:scale-95"
         >
           Inspect Steps
           <ChevronRight className="h-3.5 w-3.5" />
@@ -120,7 +120,7 @@ export function SopCard({
           <button
             type="button"
             onClick={onConfirm}
-            className="glass-button specular flex h-11 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-2xl px-5 text-[13px] font-medium text-[#d97706] active:scale-95"
+            className="glass-button specular flex h-11 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-lg px-5 text-[13px] font-medium text-[#d97706] active:scale-95"
           >
             <AlertTriangle className="h-3.5 w-3.5" />
             Confirm Current
@@ -130,7 +130,7 @@ export function SopCard({
             type="button"
             onClick={onApprove}
             disabled={sop.status === "approved"}
-            className="specular flex h-11 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:pointer-events-none disabled:opacity-45"
+            className="specular flex h-11 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:pointer-events-none disabled:opacity-45"
           >
             <ShieldCheck className="h-3.5 w-3.5" />
             Approve for MCP

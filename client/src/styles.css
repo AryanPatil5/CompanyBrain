@@ -121,7 +121,7 @@
   border: 1px solid rgba(255, 255, 255, 0.8);
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   border-right: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 1.25rem;
+  border-radius: 0.75rem;
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.03),
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
@@ -163,8 +163,8 @@
   &:hover {
     background: linear-gradient(
       135deg,
-      rgba(255, 255, 255, 0.9) 0%,
-      rgba(255, 255, 255, 0.6) 60%,
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0.03) 60%,
       rgba(59, 130, 246, 0.15) 100%
     );
     backdrop-filter: blur(12px) contrast(110%);
@@ -173,8 +173,8 @@
     color: #0071e3;
     transform: translateY(-1px);
     box-shadow:
-      inset 0 1px 1px rgba(255, 255, 255, 0.6),
-      inset 0 -1px 2px rgba(0, 0, 0, 0.1),
+      inset 0 1px 1px rgba(255, 255, 255, 0.5),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.3),
       0 4px 14px rgba(0, 113, 227, 0.12);
   }
 
@@ -184,20 +184,21 @@
   }
 }
 
+/* visionOS glass refraction lens — active segmented tabs & similar */
 @utility glass-lens {
   position: relative;
   overflow: hidden;
   background: linear-gradient(
     135deg,
-    rgba(255, 255, 255, 0.85) 0%,
-    rgba(255, 255, 255, 0.5) 60%,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.03) 60%,
     rgba(59, 130, 246, 0.15) 100%
   );
   backdrop-filter: blur(12px) contrast(110%);
   -webkit-backdrop-filter: blur(12px) contrast(110%);
   box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.6),
-    inset 0 -1px 2px rgba(0, 0, 0, 0.15),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.3),
     0 4px 12px rgba(0, 0, 0, 0.08);
   transition: transform 0.2s var(--ease-spring), background 0.3s ease, box-shadow 0.3s ease;
 
