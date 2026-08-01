@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Sparkles, Plus, Trash2, UserCheck } from "lucide-react";
+import { X, Sparkles, Plus, Trash2, UserCheck, ChevronDown } from "lucide-react";
 import { teachBrainApi } from "@/lib/sops";
 
 export function TeachBrainModal({
@@ -99,7 +99,7 @@ export function TeachBrainModal({
                   placeholder="e.g. Legacy Customer Refund Exception Protocol"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full rounded-xl border border-black/10 bg-white/80 px-3.5 py-2.5 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
+                  className="w-full h-11 rounded-2xl border border-black/10 bg-white/80 px-4 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
                 />
               </div>
 
@@ -107,17 +107,20 @@ export function TeachBrainModal({
                 <label className="text-[11.5px] font-semibold text-[#6e6e73] uppercase">
                   Category
                 </label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-xl border border-black/10 bg-white/80 px-3.5 py-2.5 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
-                >
-                  <option value="Engineering">Engineering</option>
-                  <option value="Support">Support</option>
-                  <option value="Billing">Billing</option>
-                  <option value="Operations">Operations</option>
-                  <option value="Security">Security</option>
-                </select>
+                <div className="relative">
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full h-11 appearance-none rounded-2xl border border-black/10 bg-white/80 px-4 pr-10 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20 cursor-pointer"
+                  >
+                    <option value="Engineering">Engineering</option>
+                    <option value="Support">Support</option>
+                    <option value="Billing">Billing</option>
+                    <option value="Operations">Operations</option>
+                    <option value="Security">Security</option>
+                  </select>
+                  <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6e6e73] pointer-events-none" />
+                </div>
               </div>
             </div>
 
@@ -130,7 +133,7 @@ export function TeachBrainModal({
                 placeholder="e.g. Sarah Jenkins (Head of Ops)"
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
-                className="w-full rounded-xl border border-black/10 bg-white/80 px-3.5 py-2.5 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
+                className="w-full h-11 rounded-2xl border border-black/10 bg-white/80 px-4 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
               />
             </div>
 
@@ -144,7 +147,7 @@ export function TeachBrainModal({
                 placeholder="Describe when this procedure applies and what rules govern it..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-xl border border-black/10 bg-white/80 p-3 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
+                className="w-full rounded-2xl border border-black/10 bg-white/80 p-3.5 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
               />
             </div>
 
@@ -163,7 +166,7 @@ export function TeachBrainModal({
               </div>
               {steps.map((step, idx) => (
                 <div key={idx} className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-white font-mono text-[11px] font-semibold text-[#1d1d1f] shadow-sm">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-black/10 bg-white font-mono text-[11px] font-semibold text-[#1d1d1f] shadow-sm">
                     {idx + 1}
                   </span>
                   <input
@@ -171,13 +174,13 @@ export function TeachBrainModal({
                     placeholder={`Step ${idx + 1} action (e.g. Verify account tier in Postgres)`}
                     value={step}
                     onChange={(e) => handleStepChange(idx, e.target.value)}
-                    className="flex-1 rounded-xl border border-black/10 bg-white/80 px-3.5 py-2 text-[13px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white"
+                    className="flex-1 h-11 rounded-2xl border border-black/10 bg-white/80 px-4 text-[13px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white"
                   />
                   {steps.length > 1 && (
                     <button
                       type="button"
                       onClick={() => handleRemoveStep(idx)}
-                      className="glass-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#6e6e73] hover:text-[#dc2626]"
+                      className="glass-button flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[#6e6e73] hover:text-[#dc2626]"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
