@@ -47,7 +47,7 @@ export function GlassSidebar({ onTeachClick }: { onTeachClick?: () => void }) {
           <button
             type="button"
             onClick={onTeachClick}
-            className="specular flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform hover:-translate-y-0.5"
+            className="specular flex h-11 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
           >
             <Sparkles className="h-4 w-4" />
             Teach the Brain

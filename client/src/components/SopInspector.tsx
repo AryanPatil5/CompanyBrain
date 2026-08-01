@@ -90,7 +90,7 @@ export function SopInspector({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[#6e6e73] hover:text-[#1d1d1f]"
+            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl text-[#6e6e73] hover:text-[#1d1d1f] active:scale-95"
           >
             <X className="h-4 w-4" />
           </button>
@@ -112,7 +112,7 @@ export function SopInspector({
           {sop.steps.map((step, i) => (
             <div
               key={i}
-              className="glass-card flex gap-4 rounded-2xl p-4"
+              className="glass-card flex gap-4 rounded-2xl p-4 overflow-hidden"
             >
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-black/[0.08] bg-white font-mono text-[12px] font-semibold text-[#1d1d1f] shadow-sm">
                 {i + 1}
@@ -152,7 +152,7 @@ export function SopInspector({
               <button
                 type="button"
                 onClick={() => setShowVersions(!showVersions)}
-                className="flex w-full items-center gap-2 rounded-2xl border border-black/[0.06] bg-black/[0.02] px-4 py-3 text-left text-[12px] font-medium text-[#6e6e73] transition-colors hover:bg-black/[0.05]"
+                className="flex w-full items-center gap-2 rounded-2xl border border-black/[0.06] bg-black/[0.02] px-4 py-3 text-left text-[12px] font-medium text-[#6e6e73] transition-colors hover:bg-black/[0.05] active:scale-95"
               >
                 <History className="h-3.5 w-3.5" />
                 Version Audit History ({versions.length})
@@ -186,7 +186,7 @@ export function SopInspector({
           <button
             type="button"
             onClick={onClose}
-            className="glass-button flex h-11 items-center justify-center rounded-2xl px-6 text-[13px] font-medium"
+            className="glass-button flex h-11 items-center justify-center overflow-hidden rounded-2xl px-6 text-[13px] font-medium active:scale-95"
           >
             Close
           </button>
@@ -194,7 +194,7 @@ export function SopInspector({
             <button
               type="button"
               onClick={() => onConfirm(sop.id)}
-              className="glass-button flex h-11 items-center gap-2 rounded-2xl px-6 text-[13px] font-medium text-[#d97706]"
+              className="glass-button flex h-11 items-center gap-2 overflow-hidden rounded-2xl px-6 text-[13px] font-medium text-[#d97706] active:scale-95"
             >
               <AlertTriangle className="h-3.5 w-3.5" />
               Confirm Current
@@ -204,7 +204,7 @@ export function SopInspector({
             type="button"
             disabled={sop.status === "approved"}
             onClick={() => onApprove(sop.id)}
-            className="specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-300 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50"
+            className="specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
           >
             <ShieldCheck className="h-4 w-4" />
             {sop.status === "approved"

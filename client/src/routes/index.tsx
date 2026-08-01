@@ -130,7 +130,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => setIsTeachModalOpen(true)}
-                className="specular flex h-11 items-center gap-2 rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform hover:-translate-y-0.5"
+                className="specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 Teach the Brain
@@ -139,7 +139,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => void load()}
-                className="glass-button specular flex h-11 items-center gap-2 rounded-2xl px-5 text-[13px] font-medium text-[#1d1d1f]"
+                className="glass-button specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl px-5 text-[13px] font-medium text-[#1d1d1f] active:scale-95"
               >
                 <RefreshCw
                   className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
@@ -151,7 +151,7 @@ function Index() {
 
           {/* Real-time Agent Approval Queue */}
           {pendingApprovals.length > 0 && live && (
-            <section className="glass-card rounded-[24px] border-[#f59e0b]/30 bg-[#f59e0b]/[0.06] p-5 space-y-3">
+            <section className="glass-card rounded-[24px] border-[#f59e0b]/30 bg-[#f59e0b]/[0.06] p-5 space-y-3 overflow-hidden">
               <div className="flex items-center justify-between">
                 <h3 className="text-[15px] font-semibold text-[#b45309] flex items-center gap-2">
                   <ShieldAlert className="h-4 w-4" /> Agent Real-Time Execution Approval Queue ({pendingApprovals.length})
@@ -160,7 +160,7 @@ function Index() {
               </div>
               <div className="space-y-2">
                 {pendingApprovals.map((req) => (
-                  <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-white/80 p-3.5 shadow-sm">
+                  <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-white/80 p-3.5 shadow-sm overflow-hidden">
                     <div className="space-y-0.5">
                       <p className="text-[13.5px] font-medium text-[#1d1d1f]">
                         Agent <code className="text-[#0369a1] font-mono font-semibold">{req.agent_id}</code> requested to execute: <span className="font-semibold text-[#1d1d1f]">{req.skills_sops?.title || "High-Risk SOP"}</span>
@@ -173,14 +173,14 @@ function Index() {
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "approved")}
-                        className="glass-button flex h-10 items-center gap-1.5 rounded-xl border-[#10b981]/30 bg-[#10b981]/10 px-4 text-[12px] font-semibold text-[#059669] hover:bg-[#10b981]/20"
+                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-xl border-[#10b981]/30 bg-[#10b981]/10 px-4 text-[12px] font-semibold text-[#059669] hover:bg-[#10b981]/20 active:scale-95"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve Execution
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "rejected")}
-                        className="glass-button flex h-10 items-center gap-1.5 rounded-xl border-[#ef4444]/30 bg-[#ef4444]/10 px-4 text-[12px] font-semibold text-[#dc2626] hover:bg-[#ef4444]/20"
+                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-xl border-[#ef4444]/30 bg-[#ef4444]/10 px-4 text-[12px] font-semibold text-[#dc2626] hover:bg-[#ef4444]/20 active:scale-95"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
                       </button>
