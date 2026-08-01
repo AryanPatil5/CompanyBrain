@@ -110,19 +110,19 @@ function Index() {
         <GlassSidebar onTeachClick={() => setIsTeachModalOpen(true)} />
 
         <main className="flex min-w-0 flex-1 flex-col gap-5">
-          <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-3xl px-6 py-5">
-            <div className="space-y-1.5">
-              <h1 className="text-[26px] leading-tight font-semibold">
+          <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-[24px] px-6 py-5">
+            <div className="space-y-1">
+              <h1 className="text-[26px] leading-tight font-semibold text-[#1d1d1f]">
                 Procedural Skills Library
               </h1>
-              <p className="text-[13.5px] text-muted-foreground">
+              <p className="text-[13.5px] text-[#6e6e73]">
                 Inspect, govern, and approve operational SOPs for autonomous AI agents.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="hidden items-center gap-2 text-[12px] text-muted-foreground sm:flex">
+              <span className="hidden items-center gap-2 text-[12px] font-medium text-[#6e6e73] sm:flex">
                 <span
-                  className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald shadow-[0_0_10px_2px_var(--emerald)]" : "bg-amber shadow-[0_0_10px_2px_var(--amber)]"}`}
+                  className={`h-2 w-2 rounded-full ${live ? "bg-[#10b981] shadow-[0_0_8px_rgba(16,185,129,0.6)]" : "bg-[#f59e0b] shadow-[0_0_8px_rgba(245,158,11,0.6)]"}`}
                 />
                 {live ? "Live API" : "Offline · mock data"}
               </span>
@@ -130,7 +130,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => setIsTeachModalOpen(true)}
-                className="specular flex items-center gap-2 rounded-full border border-indigo/40 bg-gradient-to-b from-indigo/80 to-primary/60 px-4 py-2 text-[13px] font-medium text-primary-foreground shadow-[0_0_20px_-4px_var(--indigo)]"
+                className="specular flex items-center gap-2 rounded-full border border-[#0071e3]/30 bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform hover:-translate-y-0.5"
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 Teach the Brain
@@ -139,7 +139,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => void load()}
-                className="glass-button specular flex items-center gap-2 rounded-full px-5 py-2 text-[13px] font-medium"
+                className="glass-button specular flex items-center gap-2 rounded-full px-5 py-2 text-[13px] font-medium text-[#1d1d1f]"
               >
                 <RefreshCw
                   className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
@@ -149,38 +149,38 @@ function Index() {
             </div>
           </header>
 
-          {/* Real-time Agent Approval Queue (Human Execution Gate) */}
+          {/* Real-time Agent Approval Queue */}
           {pendingApprovals.length > 0 && live && (
-            <section className="glass-card rounded-3xl border-amber/40 bg-amber/[0.04] p-5 space-y-3">
+            <section className="glass-card rounded-[24px] border-[#f59e0b]/30 bg-[#f59e0b]/[0.06] p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-[15px] font-semibold text-amber flex items-center gap-2">
+                <h3 className="text-[15px] font-semibold text-[#b45309] flex items-center gap-2">
                   <ShieldAlert className="h-4 w-4" /> Agent Real-Time Execution Approval Queue ({pendingApprovals.length})
                 </h3>
-                <span className="text-[11px] text-muted-foreground">Human Guardrail Triggered</span>
+                <span className="text-[11px] font-medium text-[#6e6e73]">Human Guardrail Triggered</span>
               </div>
               <div className="space-y-2">
                 {pendingApprovals.map((req) => (
-                  <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/40 p-3.5">
-                    <div className="space-y-1">
-                      <p className="text-[13.5px] font-medium">
-                        Agent <code className="text-cyan font-mono">{req.agent_id}</code> requested to execute: <span className="text-foreground">{req.skills_sops?.title || "High-Risk SOP"}</span>
+                  <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-white/80 p-3.5 shadow-sm">
+                    <div className="space-y-0.5">
+                      <p className="text-[13.5px] font-medium text-[#1d1d1f]">
+                        Agent <code className="text-[#0369a1] font-mono font-semibold">{req.agent_id}</code> requested to execute: <span className="font-semibold text-[#1d1d1f]">{req.skills_sops?.title || "High-Risk SOP"}</span>
                       </p>
-                      <p className="text-[11.5px] text-muted-foreground">
-                        Risk Level: <span className="text-amber font-semibold">{req.risk_level}</span> · Reason: {req.reason}
+                      <p className="text-[11.5px] text-[#6e6e73]">
+                        Risk Level: <span className="text-[#b45309] font-semibold">{req.risk_level}</span> · Reason: {req.reason}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "approved")}
-                        className="glass-button flex items-center gap-1.5 rounded-full border-emerald/30 bg-emerald/10 px-3.5 py-1.5 text-[12px] font-medium text-emerald hover:bg-emerald/20"
+                        className="glass-button flex items-center gap-1.5 rounded-full border-[#10b981]/30 bg-[#10b981]/10 px-3.5 py-1.5 text-[12px] font-semibold text-[#059669] hover:bg-[#10b981]/20"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve Execution
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "rejected")}
-                        className="glass-button flex items-center gap-1.5 rounded-full border-rose-500/30 bg-rose-500/10 px-3.5 py-1.5 text-[12px] font-medium text-rose-400 hover:bg-rose-500/20"
+                        className="glass-button flex items-center gap-1.5 rounded-full border-[#ef4444]/30 bg-[#ef4444]/10 px-3.5 py-1.5 text-[12px] font-semibold text-[#dc2626] hover:bg-[#ef4444]/20"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
                       </button>
@@ -194,32 +194,40 @@ function Index() {
           {/* Analytics Stats Bar */}
           {analytics && live && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3">
-                <Database className="h-4 w-4 text-indigo" />
+              <div className="glass-card flex items-center gap-3 rounded-[20px] px-4 py-3.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0071e3]/10 text-[#0071e3]">
+                  <Database className="h-4.5 w-4.5" />
+                </div>
                 <div>
-                  <p className="text-[20px] font-semibold leading-tight">{analytics.total_sops}</p>
-                  <p className="text-[10.5px] tracking-wide text-muted-foreground uppercase">Total SOPs</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.total_sops}</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Total SOPs</p>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3">
-                <ShieldCheck className="h-4 w-4 text-emerald" />
+              <div className="glass-card flex items-center gap-3 rounded-[20px] px-4 py-3.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#10b981]/10 text-[#059669]">
+                  <ShieldCheck className="h-4.5 w-4.5" />
+                </div>
                 <div>
-                  <p className="text-[20px] font-semibold leading-tight">{analytics.by_status?.Approved || 0}</p>
-                  <p className="text-[10.5px] tracking-wide text-muted-foreground uppercase">Approved</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.by_status?.Approved || 0}</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Approved</p>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3">
-                <ShieldAlert className="h-4 w-4 text-amber" />
+              <div className="glass-card flex items-center gap-3 rounded-[20px] px-4 py-3.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f59e0b]/10 text-[#d97706]">
+                  <ShieldAlert className="h-4.5 w-4.5" />
+                </div>
                 <div>
-                  <p className="text-[20px] font-semibold leading-tight">{analytics.pending_approvals_count || 0}</p>
-                  <p className="text-[10.5px] tracking-wide text-muted-foreground uppercase">Gated Queue</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.pending_approvals_count || 0}</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Gated Queue</p>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3">
-                <Activity className="h-4 w-4 text-cyan" />
+              <div className="glass-card flex items-center gap-3 rounded-[20px] px-4 py-3.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0284c7]/10 text-[#0369a1]">
+                  <Activity className="h-4.5 w-4.5" />
+                </div>
                 <div>
-                  <p className="text-[20px] font-semibold leading-tight">{analytics.recent_executions}</p>
-                  <p className="text-[10.5px] tracking-wide text-muted-foreground uppercase">Executions (7d)</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.recent_executions}</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Executions (7d)</p>
                 </div>
               </div>
             </div>
@@ -238,7 +246,7 @@ function Index() {
               />
             ))}
             {filtered.length === 0 && (
-              <p className="text-[13.5px] text-muted-foreground">
+              <p className="text-[13.5px] text-[#6e6e73]">
                 No SOPs indexed for this category yet.
               </p>
             )}

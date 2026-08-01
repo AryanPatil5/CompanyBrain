@@ -2,8 +2,6 @@
 @source "../src";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
-
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -32,47 +30,43 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-glass-border: var(--glass-border);
-  --color-indigo: var(--indigo);
-  --color-cyan: var(--cyan);
-  --color-violet: var(--violet);
-  --color-amber: var(--amber);
-  --color-emerald: var(--emerald);
-  --font-sans: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  --color-indigo: #0071e3;
+  --color-cyan: #0369a1;
+  --color-violet: #7c3aed;
+  --color-amber: #d97706;
+  --color-emerald: #059669;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
   --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
 :root {
-  --radius: 0.875rem;
-  --background: oklch(0.16 0.018 262);
-  --foreground: oklch(0.97 0.004 250);
-  --card: oklch(0.22 0.02 262);
-  --card-foreground: oklch(0.97 0.004 250);
-  --popover: oklch(0.2 0.02 262);
-  --popover-foreground: oklch(0.97 0.004 250);
-  --primary: oklch(0.62 0.19 268);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.28 0.02 262);
-  --secondary-foreground: oklch(0.97 0.004 250);
-  --muted: oklch(0.28 0.02 262);
-  --muted-foreground: oklch(0.73 0.018 258);
-  --accent: oklch(0.32 0.03 262);
-  --accent-foreground: oklch(0.97 0.004 250);
-  --destructive: oklch(0.62 0.22 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.62 0.19 268);
-  --glass-border: oklch(1 0 0 / 12%);
-  --indigo: oklch(0.66 0.18 272);
-  --cyan: oklch(0.78 0.13 205);
-  --violet: oklch(0.68 0.19 300);
-  --amber: oklch(0.79 0.15 76);
-  --emerald: oklch(0.75 0.15 165);
-}
-
-.dark {
-  color-scheme: dark;
+  --radius: 1.125rem;
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --card: rgba(255, 255, 255, 0.65);
+  --card-foreground: #1d1d1f;
+  --popover: rgba(255, 255, 255, 0.85);
+  --popover-foreground: #1d1d1f;
+  --primary: #0071e3;
+  --primary-foreground: #ffffff;
+  --secondary: rgba(0, 0, 0, 0.04);
+  --secondary-foreground: #1d1d1f;
+  --muted: rgba(0, 0, 0, 0.04);
+  --muted-foreground: #6e6e73;
+  --accent: rgba(0, 113, 227, 0.08);
+  --accent-foreground: #0071e3;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(0, 0, 0, 0.08);
+  --ring: #0071e3;
+  --glass-border: rgba(255, 255, 255, 0.8);
+  --indigo: #0071e3;
+  --cyan: #0369a1;
+  --violet: #7c3aed;
+  --amber: #d97706;
+  --emerald: #059669;
 }
 
 @layer base {
@@ -81,12 +75,12 @@
   }
 
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   body {
-    background-color: #0a0d14;
-    color: var(--color-foreground);
+    background-color: #f5f5f7;
+    color: #1d1d1f;
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     letter-spacing: -0.011em;
@@ -95,78 +89,80 @@
   h1,
   h2,
   h3 {
-    letter-spacing: -0.028em;
+    color: #1d1d1f;
+    font-weight: 600;
+    letter-spacing: -0.024em;
   }
 }
 
+/* ─── Apple macOS / visionOS Liquid Glass ─────────────────────── */
+
 @utility glass-panel {
-  background: linear-gradient(
-    160deg,
-    rgba(255, 255, 255, 0.07),
-    rgba(255, 255, 255, 0.03) 55%
-  );
-  backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.68);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 1.25rem;
   box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.08) inset,
-    0 20px 50px -20px rgba(0, 0, 0, 0.7);
+    0 8px 32px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 @utility glass-card {
   position: relative;
-  background: linear-gradient(
-    160deg,
-    rgba(255, 255, 255, 0.06),
-    rgba(255, 255, 255, 0.025) 60%
-  );
-  backdrop-filter: blur(24px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 1.25rem;
   box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.07) inset,
-    0 18px 40px -24px rgba(0, 0, 0, 0.8);
+    0 8px 32px rgba(0, 0, 0, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
   transition:
-    transform 0.5s var(--ease-spring),
-    box-shadow 0.5s var(--ease-spring),
-    border-color 0.4s ease,
-    background 0.4s ease;
+    transform 0.4s var(--ease-spring),
+    box-shadow 0.4s var(--ease-spring),
+    border-color 0.3s ease,
+    background 0.3s ease;
 }
 
 @utility glass-card-hover {
   &:hover {
-    transform: translateY(-4px);
-    border-color: rgba(255, 255, 255, 0.22);
+    transform: translateY(-3px);
+    border-color: rgba(0, 113, 227, 0.28);
     box-shadow:
-      0 1px 0 0 rgba(255, 255, 255, 0.16) inset,
-      0 0 0 1px rgba(129, 140, 248, 0.18),
-      0 30px 60px -28px rgba(0, 0, 0, 0.9),
-      0 0 46px -18px rgba(99, 102, 241, 0.45);
+      0 14px 38px -10px rgba(0, 113, 227, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 1);
   }
 }
 
 @utility glass-button {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.11),
-    rgba(255, 255, 255, 0.04)
-  );
-  backdrop-filter: blur(18px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.16) inset;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: #1d1d1f;
   transition:
-    transform 0.35s var(--ease-spring),
-    background 0.3s ease,
-    border-color 0.3s ease;
+    transform 0.3s var(--ease-spring),
+    background 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    color 0.25s ease;
 
   &:hover {
-    background: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.18),
-      rgba(255, 255, 255, 0.07)
-    );
-    border-color: rgba(255, 255, 255, 0.26);
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(0, 113, 227, 0.3);
+    color: #0071e3;
     transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 113, 227, 0.1);
   }
 
   &:active {
@@ -182,11 +178,11 @@
     background: linear-gradient(
       105deg,
       transparent 30%,
-      rgba(255, 255, 255, 0.22) 48%,
+      rgba(255, 255, 255, 0.45) 48%,
       transparent 62%
     );
     transform: translateX(-120%);
-    transition: transform 0.9s var(--ease-spring);
+    transition: transform 0.8s var(--ease-spring);
     pointer-events: none;
   }
 
@@ -195,29 +191,34 @@
   }
 }
 
+/* Ambient pastel glow spots fixed in opposite background corners */
 @utility ambient-field {
   position: fixed;
   inset: 0;
   pointer-events: none;
   background:
     radial-gradient(
-      50rem 40rem at 8% -6%,
-      rgba(99, 102, 241, 0.28),
+      55rem 45rem at 5% -5%,
+      #e0f2fe,
+      transparent 65%
+    ),
+    radial-gradient(
+      55rem 45rem at 95% 105%,
+      #f3e8ff,
+      transparent 65%
+    ),
+    radial-gradient(
+      40rem 35rem at 90% 5%,
+      rgba(224, 242, 254, 0.6),
       transparent 60%
-    ),
-    radial-gradient(
-      45rem 38rem at 100% 4%,
-      rgba(34, 211, 238, 0.16),
-      transparent 62%
-    ),
-    radial-gradient(
-      55rem 45rem at 82% 108%,
-      rgba(168, 85, 247, 0.18),
-      transparent 60%
-    ),
-    radial-gradient(
-      40rem 34rem at 0% 100%,
-      rgba(14, 165, 233, 0.12),
-      transparent 62%
     );
+}
+
+/* Code Pills & Triggers */
+@utility code-pill {
+  background: rgba(2, 132, 199, 0.08);
+  border: 1px solid rgba(2, 132, 199, 0.15);
+  color: #0369a1;
+  font-family: var(--font-mono);
+  border-radius: 0.5rem;
 }
