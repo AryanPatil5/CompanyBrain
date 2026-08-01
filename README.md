@@ -26,7 +26,7 @@ Company Brain acts as a living map of how a company operates. It:
  │ Multi-Source │                 │                           │                 │     AI Agent Layer      │
  │  Ingestion   │                 │  ┌─────────────────────┐  │                 │                         │
  │              │ ── Webhooks ──> │  │ LLM Extraction &    │  │ ── FastMCP ───> │  Claude / Cursor /      │
- │ Slack        │                 │  │ Freshness Engine    │  │    Port 8080   │  Custom Autonomous      │
+ │ Slack        │                 │  │ Freshness Engine    │  │    Port 8080    │  Custom Autonomous      │
  │ GitHub       │                 │  └──────────┬──────────┘  │                 │  Agents                 │
  │ Linear       │                 │             │             │                 └─────────────────────────┘
  └──────────────┘                 │             ▼             │
