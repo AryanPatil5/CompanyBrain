@@ -130,7 +130,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => setIsTeachModalOpen(true)}
-                className="specular flex items-center gap-2 rounded-full border border-[#0071e3]/30 bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform hover:-translate-y-0.5"
+                className="specular flex h-11 items-center gap-2 rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform hover:-translate-y-0.5"
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 Teach the Brain
@@ -139,7 +139,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => void load()}
-                className="glass-button specular flex items-center gap-2 rounded-full px-5 py-2 text-[13px] font-medium text-[#1d1d1f]"
+                className="glass-button specular flex h-11 items-center gap-2 rounded-2xl px-5 text-[13px] font-medium text-[#1d1d1f]"
               >
                 <RefreshCw
                   className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
@@ -173,14 +173,14 @@ function Index() {
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "approved")}
-                        className="glass-button flex items-center gap-1.5 rounded-full border-[#10b981]/30 bg-[#10b981]/10 px-3.5 py-1.5 text-[12px] font-semibold text-[#059669] hover:bg-[#10b981]/20"
+                        className="glass-button flex h-10 items-center gap-1.5 rounded-xl border-[#10b981]/30 bg-[#10b981]/10 px-4 text-[12px] font-semibold text-[#059669] hover:bg-[#10b981]/20"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve Execution
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "rejected")}
-                        className="glass-button flex items-center gap-1.5 rounded-full border-[#ef4444]/30 bg-[#ef4444]/10 px-3.5 py-1.5 text-[12px] font-semibold text-[#dc2626] hover:bg-[#ef4444]/20"
+                        className="glass-button flex h-10 items-center gap-1.5 rounded-xl border-[#ef4444]/30 bg-[#ef4444]/10 px-4 text-[12px] font-semibold text-[#dc2626] hover:bg-[#ef4444]/20"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
                       </button>

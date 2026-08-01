@@ -111,7 +111,7 @@ export function SopCard({
         <button
           type="button"
           onClick={onInspect}
-          className="glass-button flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-medium"
+          className="glass-button flex h-11 flex-1 items-center justify-center gap-1.5 rounded-2xl px-5 text-[13px] font-medium"
         >
           Inspect Steps
           <ChevronRight className="h-3.5 w-3.5" />
@@ -120,7 +120,7 @@ export function SopCard({
           <button
             type="button"
             onClick={onConfirm}
-            className="glass-button specular flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-medium text-[#d97706]"
+            className="glass-button specular flex h-11 flex-1 items-center justify-center gap-1.5 rounded-2xl px-5 text-[13px] font-medium text-[#d97706]"
           >
             <AlertTriangle className="h-3.5 w-3.5" />
             Confirm Current
@@ -130,7 +130,7 @@ export function SopCard({
             type="button"
             onClick={onApprove}
             disabled={sop.status === "approved"}
-            className="specular flex flex-1 items-center justify-center gap-1.5 rounded-full border border-[#0071e3]/30 bg-[#0071e3] px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-300 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-45"
+            className="specular flex h-11 flex-1 items-center justify-center gap-1.5 rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-300 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-45"
           >
             <ShieldCheck className="h-3.5 w-3.5" />
             Approve for MCP
