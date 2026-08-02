@@ -1,12 +1,22 @@
 import { Brain, Boxes, Network, Plug, Sparkles } from "lucide-react";
 
-const NAV = [
-  { label: "Skills Library", icon: Boxes },
-  { label: "FastMCP Network", icon: Network },
-  { label: "Integrations", icon: Plug },
+export type NavTab = "skills" | "mcp" | "integrations";
+
+const NAV: Array<{ id: NavTab; label: string; icon: any }> = [
+  { id: "skills", label: "Skills Library", icon: Boxes },
+  { id: "mcp", label: "FastMCP Network", icon: Network },
+  { id: "integrations", label: "Integrations", icon: Plug },
 ];
 
-export function GlassSidebar({ onTeachClick }: { onTeachClick?: () => void }) {
+export function GlassSidebar({
+  activeTab = "skills",
+  onTabChange,
+  onTeachClick,
+}: {
+  activeTab?: NavTab;
+  onTabChange?: (tab: NavTab) => void;
+  onTeachClick?: () => void;
+}) {
   return (
     <aside className="glass-panel hidden w-64 shrink-0 flex-col rounded-2xl p-4 lg:flex overflow-hidden">
       <div className="flex items-center gap-3 px-2 py-3">
@@ -20,14 +30,15 @@ export function GlassSidebar({ onTeachClick }: { onTeachClick?: () => void }) {
       </div>
 
       <nav className="mt-6 flex flex-col gap-1">
-        {NAV.map((item, i) => {
-          const active = i === 0;
+        {NAV.map((item) => {
+          const active = activeTab === item.id;
           return (
             <button
-              key={item.label}
+              key={item.id}
               type="button"
+              onClick={() => onTabChange?.(item.id)}
               className={[
-                "group flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-[13.5px] transition-all duration-300 overflow-hidden",
+                "group flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-[13.5px] transition-all duration-300 overflow-hidden cursor-pointer active:scale-95",
                 active
                   ? "glass-button font-semibold text-[#0071e3] shadow-[0_2px_10px_rgba(0,113,227,0.08)]"
                   : "text-[#6e6e73] hover:bg-black/[0.04] hover:text-[#1d1d1f]",
@@ -47,7 +58,7 @@ export function GlassSidebar({ onTeachClick }: { onTeachClick?: () => void }) {
           <button
             type="button"
             onClick={onTeachClick}
-            className="specular flex h-11 w-full items-center justify-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
+            className="specular flex h-11 w-full items-center justify-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer"
           >
             <Sparkles className="h-4 w-4" />
             Teach the Brain

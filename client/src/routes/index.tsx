@@ -1,11 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Database, ShieldCheck, AlertTriangle, Activity, Sparkles, ShieldAlert, Check, X } from "lucide-react";
-import { GlassSidebar } from "@/components/GlassSidebar";
+import { GlassSidebar, type NavTab } from "@/components/GlassSidebar";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { SopCard } from "@/components/SopCard";
 import { SopInspector } from "@/components/SopInspector";
 import { TeachBrainModal } from "@/components/TeachBrainModal";
+import { FastMcpNetworkModal } from "@/components/FastMcpNetworkModal";
+import { IntegrationsModal } from "@/components/IntegrationsModal";
 import {
   fetchSops,
   approveSopApi,
@@ -42,6 +44,7 @@ function Index() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [isTeachModalOpen, setIsTeachModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<NavTab>("skills");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,12 +103,18 @@ function Index() {
     }
   };
 
-  const activeSop = sops.find((s) => s.id === activeId) ?? null;  return (
+  const activeSop = sops.find((s) => s.id === activeId) ?? null;
+
+  return (
     <div className="relative min-h-screen">
       <div className="ambient-field" aria-hidden />
 
       <div className="relative flex min-h-screen gap-5 p-5">
-        <GlassSidebar onTeachClick={() => setIsTeachModalOpen(true)} />
+        <GlassSidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onTeachClick={() => setIsTeachModalOpen(true)}
+        />
 
         <main className="flex min-w-0 flex-1 flex-col gap-5">
           <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-2xl px-6 py-5 overflow-hidden">
@@ -128,7 +137,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => setIsTeachModalOpen(true)}
-                className="specular flex h-11 items-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
+                className="specular flex h-11 items-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer"
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 Teach the Brain
@@ -137,7 +146,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => void load()}
-                className="glass-button specular flex h-11 items-center gap-2 overflow-hidden rounded-lg px-5 text-[13px] font-medium text-[#1d1d1f] active:scale-95"
+                className="glass-button specular flex h-11 items-center gap-2 overflow-hidden rounded-lg px-5 text-[13px] font-medium text-[#1d1d1f] active:scale-95 cursor-pointer"
               >
                 <RefreshCw
                   className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
@@ -171,14 +180,14 @@ function Index() {
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "approved")}
-                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-green-200 bg-green-50 px-4 text-[12px] font-semibold text-green-800 hover:bg-green-100 active:scale-95"
+                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-green-200 bg-green-50 px-4 text-[12px] font-semibold text-green-800 hover:bg-green-100 active:scale-95 cursor-pointer"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve Execution
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "rejected")}
-                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-red-200 bg-red-50 px-4 text-[12px] font-semibold text-red-700 hover:bg-red-100 active:scale-95"
+                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-red-200 bg-red-50 px-4 text-[12px] font-semibold text-red-700 hover:bg-red-100 active:scale-95 cursor-pointer"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
                       </button>
@@ -263,6 +272,16 @@ function Index() {
         isOpen={isTeachModalOpen}
         onClose={() => setIsTeachModalOpen(false)}
         onSuccess={() => void load()}
+      />
+
+      <FastMcpNetworkModal
+        isOpen={activeTab === "mcp"}
+        onClose={() => setActiveTab("skills")}
+      />
+
+      <IntegrationsModal
+        isOpen={activeTab === "integrations"}
+        onClose={() => setActiveTab("skills")}
       />
     </div>
   );
