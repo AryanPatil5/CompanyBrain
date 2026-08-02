@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabase } from '../config/supabase.js';
+import { supabase, createTenantClient } from '../config/supabase.js';
 import { createVersion, confirmSOP, markStaleSOPs } from '../services/freshness.js';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 
@@ -8,6 +8,14 @@ const router = Router();
 // Apply authentication middleware globally to all SOP routes
 router.use(authenticate);
 
+function getTenantClient(req: Request) {
+  const authHeader = req.headers['authorization'] as string;
+  if (authHeader && authHeader.startsWith('Bearer ') && authHeader.length > 20 && !authHeader.includes('mock')) {
+    return createTenantClient(authHeader.substring(7));
+  }
+  return supabase; // service-role fallback for mock tokens or local dev
+}
+
 // ─── GET all SOPs ────────────────────────────────────────────
 
 router.get('/', async (req: Request, res: Response): Promise<void> => {
@@ -15,8 +23,9 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;
     const { category, status } = req.query;
+    const client = getTenantClient(req);
 
-    let query = supabase.from('skills_sops').select('*');
+    let query = client.from('skills_sops').select('*');
 
     // Scoped strictly by the authenticated user's workspace_id
     query = query.eq('workspace_id', workspaceId);

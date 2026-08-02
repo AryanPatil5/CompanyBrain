@@ -8,6 +8,12 @@ import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
 
 dotenv.config();
 
+export const DEV_SEED_WORKSPACE_ID = process.env.DEV_SEED_WORKSPACE_ID || '00000000-0000-0000-0000-000000000000';
+
+if (process.env.NODE_ENV === 'production' && process.env.PROVISIONED_WORKSPACE_ID === DEV_SEED_WORKSPACE_ID) {
+  throw new Error("FATAL: Production mode cannot be provisioned with demo seed workspace ID '00000000-0000-0000-0000-000000000000'.");
+}
+
 const app = express();
 const PORT = process.env.PORT || 5001; // Updated default port to 5001 to avoid macOS AirPlay conflict
 

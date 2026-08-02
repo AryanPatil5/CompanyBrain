@@ -23,26 +23,35 @@ export interface GateCheckResult {
  */
 export async function checkExecutionGate(
   sop: { id: string; title: string; risk_level?: string; requires_human_gate?: boolean },
-  trustRole: 'low_trust' | 'high_trust' | 'admin'
+  trustRole: 'low_trust' | 'high_trust' | 'admin',
+  approvalId?: string
 ): Promise<GateCheckResult> {
   const isHighRisk = sop.risk_level === 'High' || sop.risk_level === 'Critical' || !!sop.requires_human_gate;
 
   if (isHighRisk && trustRole === 'low_trust') {
-    const { data: gateReq } = await supabase
-      .from('pending_approvals')
-      .select('id, status')
-      .eq('sop_id', sop.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (!gateReq || gateReq.status !== 'approved') {
+    if (!approvalId) {
       return {
         gated: true,
         riskLevel: sop.risk_level || 'High',
         sopTitle: sop.title,
-        approvalStatus: gateReq ? gateReq.status : 'unrequested',
-        message: `HIGH/CRITICAL RISK GATE ENFORCED: Real-time human manager approval is required to execute SOP "${sop.title}". Invoke 'request_execution_approval' tool to submit an execution gate ticket to manager dashboard.`,
+        approvalStatus: 'unrequested',
+        message: `HIGH/CRITICAL RISK GATE ENFORCED: Real-time human manager approval is required to execute SOP "${sop.title}". Pass a valid 'approval_id' from 'request_execution_approval' tool.`,
+      };
+    }
+
+    const { data: gateReq } = await supabase
+      .from('pending_approvals')
+      .select('id, status, sop_id, consumed_at')
+      .eq('id', approvalId)
+      .single();
+
+    if (!gateReq || gateReq.sop_id !== sop.id || gateReq.status !== 'approved' || gateReq.consumed_at !== null) {
+      return {
+        gated: true,
+        riskLevel: sop.risk_level || 'High',
+        sopTitle: sop.title,
+        approvalStatus: gateReq ? (gateReq.consumed_at ? 'already_consumed' : gateReq.status) : 'unrequested',
+        message: `HIGH/CRITICAL RISK GATE ENFORCED: Approval ticket #${approvalId} is invalid, unapproved, or has already been consumed. A fresh manager approval is required.`,
       };
     }
   }
@@ -381,9 +390,10 @@ server.addTool({
     sopId: z.string().uuid().describe('The UUID of the approved SOP'),
     stepNumber: z.number().describe('The step number to execute (1-indexed)'),
     mcpToken: z.string().describe('Authenticated FastMCP API token'),
+    approvalId: z.string().uuid().optional().describe('Required approval_id for High/Critical risk SOPs'),
     parameters: z.record(z.any()).optional().describe('Input parameters or thresholds for this step execution'),
   }),
-  execute: async ({ sopId, stepNumber, mcpToken, parameters }) => {
+  execute: async ({ sopId, stepNumber, mcpToken, approvalId, parameters }) => {
     // 1. Authenticate session token and derive role & workspace strictly on server
     const session = await authenticateMcpToken(mcpToken);
     if (!session.authenticated) {
@@ -411,12 +421,13 @@ server.addTool({
     }
 
     // 3. Call shared production checkExecutionGate function
-    const gateRes = await checkExecutionGate(sop, trustRole);
+    const gateRes = await checkExecutionGate(sop, trustRole, approvalId);
     if (gateRes.gated) {
       await logExecution(sopId, 'execute_sop_step', { stepNumber, blocked: true }, 'blocked_gated', callerId);
       return JSON.stringify({
         error: `HUMAN GATE REQUIRED: SOP "${sop.title}" requires human manager approval before step execution. Please submit an execution ticket using 'request_execution_approval'.`,
         approval_status: gateRes.approvalStatus,
+        message: gateRes.message,
       });
     }
 
@@ -449,6 +460,18 @@ server.addTool({
       parameters || stepDef.parameters || {},
       credentialRef
     );
+
+    // Consume single-use approval ticket on successful execution
+    if (httpRes.success && approvalId) {
+      try {
+        await supabase
+          .from('pending_approvals')
+          .update({ consumed_at: new Date().toISOString() })
+          .eq('id', approvalId);
+      } catch (consumeErr) {
+        console.warn('[MCP] Failed to mark approval ticket consumed:', consumeErr);
+      }
+    }
 
     const executionId = `exec_${Date.now()}_step_${stepNumber}`;
     const dispatchDetails = {

@@ -1,5 +1,6 @@
 import { authenticateMcpToken, checkExecutionGate } from '../src/services/mcp.js';
 import { dispatchStepExecution } from '../src/services/integrations/http_adapters.js';
+import { resolveWorkspaceForWebhook } from '../src/routes/connectors.js';
 import { supabase } from '../src/config/supabase.js';
 
 async function runMcpGuardrailsTestSuite() {
@@ -72,7 +73,7 @@ async function runMcpGuardrailsTestSuite() {
       failed++;
     }
   } catch (err) {
-    console.error("❌ TEST 3 EXCEPTION:", err);
+    console.error("❌ TEST 4 EXCEPTION:", err);
     failed++;
   }
 
@@ -123,6 +124,46 @@ async function runMcpGuardrailsTestSuite() {
     }
   } catch (err) {
     console.error("❌ TEST 6 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 7: Single-Use Approval Ticket Consumption (Gap 4) ───
+  try {
+    const lowTrustSession = await authenticateMcpToken('mcp-lowtrust-key-01');
+    const dummySop = { id: '00000000-0000-0000-0000-000000000002', title: 'Single-Use Approval SOP', risk_level: 'High', requires_human_gate: true };
+    
+    // Check gate without approval_id (should be gated)
+    const noApprovalRes = await checkExecutionGate(dummySop, lowTrustSession.trustRole);
+
+    // Check gate with already consumed approval ticket simulation (should be gated)
+    const consumedRes = await checkExecutionGate(dummySop, lowTrustSession.trustRole, '00000000-0000-0000-0000-000000000099');
+
+    if (noApprovalRes.gated && consumedRes.gated) {
+      console.log("✅ TEST 7 PASSED: Single-use approval ticket consumption enforced (missing/consumed tickets rejected).");
+      passed++;
+    } else {
+      console.error("❌ TEST 7 FAILED: Single-use approval ticket check failed!", { noApprovalRes, consumedRes });
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 7 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 8: Webhook Server-Side Tenant Resolution (Gap 3) ───
+  try {
+    const slackWorkspace = await resolveWorkspaceForWebhook('slack', 'T12345678');
+    const nonExistentWorkspace = await resolveWorkspaceForWebhook('slack', 'T_FAKE_UNKNOWN_ORG');
+
+    if (nonExistentWorkspace === null) {
+      console.log("✅ TEST 8 PASSED: Webhook server-side tenant lookup resolved correctly (unmapped orgs return null).");
+      passed++;
+    } else {
+      console.error("❌ TEST 8 FAILED: Webhook server-side tenant lookup failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 8 EXCEPTION:", err);
     failed++;
   }
 

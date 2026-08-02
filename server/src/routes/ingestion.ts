@@ -12,7 +12,7 @@ import {
   type ThreadPayload,
 } from '../services/connectors.js';
 import { detectConflict, createVersion } from '../services/freshness.js';
-import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature } from './connectors.js';
+import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature, resolveWorkspaceForWebhook } from './connectors.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { generateEmbedding } from '../services/embeddings.js';
 
@@ -167,6 +167,15 @@ async function processThread(payload: ThreadPayload, res: Response): Promise<voi
 
 router.post('/webhook', verifySlackSignature, async (req: Request, res: Response): Promise<void> => {
   try {
+    const externalOrgId = req.body.team_id || req.body.team?.id;
+    if (externalOrgId) {
+      const serverWorkspaceId = await resolveWorkspaceForWebhook('slack', externalOrgId);
+      if (serverWorkspaceId && req.body.workspace_id && req.body.workspace_id !== serverWorkspaceId) {
+        res.status(400).json({ error: 'Invalid webhook payload: workspace_id mismatch with verified integration installation.' });
+        return;
+      }
+    }
+
     const payload = normalizeSlack(req.body);
     if (!payload) {
       res.status(400).json({ error: 'Missing required payload parameters or invalid messages format.' });
@@ -181,6 +190,15 @@ router.post('/webhook', verifySlackSignature, async (req: Request, res: Response
 
 router.post('/webhook/github', verifyGitHubSignature, async (req: Request, res: Response): Promise<void> => {
   try {
+    const externalOrgId = req.body.installation?.id || req.body.repository?.owner?.id || req.body.org;
+    if (externalOrgId) {
+      const serverWorkspaceId = await resolveWorkspaceForWebhook('github', String(externalOrgId));
+      if (serverWorkspaceId && req.body.workspace_id && req.body.workspace_id !== serverWorkspaceId) {
+        res.status(400).json({ error: 'Invalid webhook payload: workspace_id mismatch with verified integration installation.' });
+        return;
+      }
+    }
+
     const payload = normalizeGitHub(req.body);
     if (!payload) {
       res.status(400).json({ error: 'Invalid GitHub payload.' });
@@ -194,6 +212,15 @@ router.post('/webhook/github', verifyGitHubSignature, async (req: Request, res: 
 
 router.post('/webhook/linear', verifyLinearSignature, async (req: Request, res: Response): Promise<void> => {
   try {
+    const externalOrgId = req.body.organizationId || req.body.org_id;
+    if (externalOrgId) {
+      const serverWorkspaceId = await resolveWorkspaceForWebhook('linear', String(externalOrgId));
+      if (serverWorkspaceId && req.body.workspace_id && req.body.workspace_id !== serverWorkspaceId) {
+        res.status(400).json({ error: 'Invalid webhook payload: workspace_id mismatch with verified integration installation.' });
+        return;
+      }
+    }
+
     const payload = normalizeLinear(req.body);
     if (!payload) {
       res.status(400).json({ error: 'Invalid Linear payload.' });

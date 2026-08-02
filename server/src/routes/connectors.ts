@@ -1,5 +1,33 @@
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
+import { supabase } from '../config/supabase.js';
+
+/**
+ * Server-side lookup utility mapping external org IDs to internal workspace_id
+ */
+export async function resolveWorkspaceForWebhook(
+  provider: 'slack' | 'github' | 'linear' | 'zendesk',
+  externalOrgId: string
+): Promise<string | null> {
+  if (!externalOrgId) return null;
+
+  try {
+    const { data } = await supabase
+      .from('integration_installations')
+      .select('workspace_id')
+      .eq('provider', provider)
+      .eq('external_org_id', externalOrgId)
+      .single();
+
+    if (data?.workspace_id) {
+      return data.workspace_id;
+    }
+  } catch {
+    // Non-fatal lookup fallback
+  }
+
+  return null;
+}
 
 // Middleware for Slack Webhook signature verification
 export function verifySlackSignature(req: Request, res: Response, next: NextFunction) {
