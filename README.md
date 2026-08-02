@@ -70,6 +70,25 @@ Run database migrations in Supabase SQL Editor:
 5. `server/supabase/005_ingestion_failures_and_embeddings.sql`
 6. `server/supabase/006_crawled_sources_table.sql`
 7. `server/supabase/007_tool_registry.sql`
+8. `server/supabase/008_rls_hardening_and_vector_precision.sql`
+9. `server/supabase/009_agent_registry.sql`
+10. `server/supabase/010_single_use_approvals.sql`
+11. `server/supabase/011_remove_workspace_bypass.sql`
+12. `server/supabase/012_integration_installations.sql`
+13. `server/supabase/013_rls_hardening_remaining_tables.sql`
+14. `server/supabase/014_user_workspace_roles.sql`
+15. `server/supabase/015_custom_access_token_hook.sql`
+
+#### Custom Access Token Hook Setup (Supabase Dashboard)
+1. Go to **Supabase Dashboard** -> **Authentication** -> **Hooks (Beta)**.
+2. Enable **Custom Access Token Hook**.
+3. Select scheme: `public.custom_access_token_hook`.
+
+#### Provision Admin & Team Users
+Provision initial admin users with assigned workspace roles using the server script:
+```bash
+npx tsx server/src/scripts/provision_user.ts admin@company.com admin
+```
 
 Start the Express API & FastMCP Server:
 ```bash
