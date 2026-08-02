@@ -3,14 +3,6 @@ import { z } from 'zod';
 import { supabase } from '../config/supabase.js';
 import { dispatchStepExecution } from './integrations/http_adapters.js';
 
-const server = new FastMCP({
-  name: 'Company Brain FastMCP',
-  version: '2.5.0',
-});
-
-/**
- * Interface for authenticated MCP Session Context
- */
 export interface McpSessionContext {
   authenticated: boolean;
   agentId: string;
@@ -66,6 +58,19 @@ export async function authenticateMcpToken(token?: string): Promise<McpSessionCo
 
   return unauthenticated;
 }
+
+const server = new FastMCP({
+  name: 'Company Brain FastMCP',
+  version: '2.5.0',
+  authenticate: async (request: any): Promise<Record<string, unknown>> => {
+    const authHeader = request.headers?.['authorization'] || request.headers?.['x-api-key'];
+    const session = await authenticateMcpToken(authHeader);
+    if (!session.authenticated) {
+      throw new Error('Unauthorized: Invalid or missing FastMCP Bearer token / API key.');
+    }
+    return session as unknown as Record<string, unknown>;
+  },
+});
 
 /**
  * Logs tool executions to execution_logs for observability

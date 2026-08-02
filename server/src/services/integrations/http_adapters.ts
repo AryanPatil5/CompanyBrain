@@ -1,3 +1,4 @@
+import pg from 'pg';
 import { resolveCredential } from './secrets.js';
 
 export interface HttpDispatchResult {
@@ -146,7 +147,7 @@ export async function githubCommentAdapter(
 }
 
 /**
- * Stripe REST Integration Adapter (Form-Encoded POST requests)
+ * Stripe REST Integration Adapter (Form-Encoded POST requests to specific paths)
  */
 export async function stripeAdapter(
   endpointConfig: any,
@@ -186,6 +187,10 @@ export async function stripeAdapter(
     targetPath = '/v1/customers';
     if (parameters?.email) bodyParams.append('email', parameters.email);
     if (parameters?.description) bodyParams.append('description', parameters.description);
+  } else if (action.includes('invoice')) {
+    targetPath = '/v1/invoices';
+    if (parameters?.customer) bodyParams.append('customer', parameters.customer);
+    if (parameters?.auto_advance) bodyParams.append('auto_advance', String(parameters.auto_advance));
   } else {
     targetPath = '/v1/charges';
     if (parameters?.amount) bodyParams.append('amount', String(parameters.amount));
@@ -206,7 +211,7 @@ export async function stripeAdapter(
 }
 
 /**
- * Strict Template Allow-List for Postgres Adapter (No Arbitrary SQL Interpolation)
+ * Strict Query Template Allow-List for Postgres Adapter (No Arbitrary SQL Interpolation)
  */
 const POSTGRES_TEMPLATE_ALLOWLIST: Record<string, { query: string; paramKeys: string[] }> = {
   'SELECT_HEALTH': {
@@ -225,10 +230,14 @@ const POSTGRES_TEMPLATE_ALLOWLIST: Record<string, { query: string; paramKeys: st
     query: 'SELECT id, tier, status FROM accounts WHERE id = $1',
     paramKeys: ['account_id'],
   },
+  'SELECT_SOP_COUNT': {
+    query: 'SELECT count(*) as total FROM skills_sops WHERE workspace_id = $1',
+    paramKeys: ['workspace_id'],
+  },
 };
 
 /**
- * Postgres Database Integration Adapter (Template Allow-List Parameterized Queries)
+ * Postgres Database Integration Adapter using real pg Client & Strict Template Allow-List
  */
 export async function postgresAdapter(
   endpointConfig: any,
@@ -249,13 +258,27 @@ export async function postgresAdapter(
 
   const queryValues = template.paramKeys.map((key) => parameters?.[key] ?? null);
 
-  if (isProd) {
-    // In production, execute parameterized query via DB connection pool or RPC
-    return {
-      success: true,
-      status_code: 200,
-      response_data: { template_key: templateKey, query: template.query, values: queryValues, status: 'executed' },
-    };
+  if (isProd && process.env.DATABASE_URL) {
+    const { Client } = pg;
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    try {
+      await client.connect();
+      const res = await client.query(template.query, queryValues);
+      await client.end();
+      return {
+        success: true,
+        status_code: 200,
+        response_data: { template_key: templateKey, rows: res.rows, row_count: res.rowCount },
+      };
+    } catch (err) {
+      try { await client.end(); } catch {}
+      return {
+        success: false,
+        status_code: 500,
+        response_data: null,
+        error: `Postgres execution error: ${(err as Error).message}`,
+      };
+    }
   }
 
   return {
@@ -289,11 +312,11 @@ export async function dispatchStepExecution(
     return postgresAdapter(endpointConfig, parameters);
   }
 
-  // For un-adapted target systems (vault, admin_cli, zendesk), return an explicit error
+  // Immediately return error for unsupported target systems (vault, admin_cli, zendesk)
   return {
     success: false,
     status_code: 400,
     response_data: null,
-    error: `No adapter configured for target_system '${targetSystem}'`,
+    error: 'No adapter configured for target_system',
   };
 }
