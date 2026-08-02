@@ -12,6 +12,7 @@ import {
   type ThreadPayload,
 } from '../services/connectors.js';
 import { detectConflict, createVersion } from '../services/freshness.js';
+import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature } from './connectors.js';
 
 const router = Router();
 
@@ -145,7 +146,7 @@ async function processThread(payload: ThreadPayload, res: Response): Promise<voi
 
 // ─── Webhook Routes ──────────────────────────────────────────
 
-router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook', verifySlackSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const payload = normalizeSlack(req.body);
     if (!payload) {
@@ -159,7 +160,7 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-router.post('/webhook/github', async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/github', verifyGitHubSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const payload = normalizeGitHub(req.body);
     if (!payload) {
@@ -172,7 +173,7 @@ router.post('/webhook/github', async (req: Request, res: Response): Promise<void
   }
 });
 
-router.post('/webhook/linear', async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/linear', verifyLinearSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const payload = normalizeLinear(req.body);
     if (!payload) {
