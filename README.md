@@ -58,9 +58,11 @@ Create `server/.env` based on `server/.env.example`:
 PORT=5001
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+SUPABASE_ANON_KEY=your_public_anon_key
 OPENROUTER_API_KEY=your_openrouter_key
-JWT_SECRET=your_jwt_signing_secret
 ```
+
+*Note: User authentication is handled natively by Supabase Auth session tokens (verified via `supabase.auth.getUser()`). Hand-rolled HMAC JWT signing (`JWT_SECRET`) has been replaced by Supabase Auth.*
 
 Run database migrations in Supabase SQL Editor:
 1. `server/supabase/create_skills_sops.sql`

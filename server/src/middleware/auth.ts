@@ -66,14 +66,14 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   const role = payload?.role;
   const workspaceId = payload?.workspace_id;
 
-  if (role !== 'admin' && role !== 'approver' && role !== 'member') {
-    return res.status(401).json({ error: 'Unauthorized: user has no assigned role/workspace' });
+  if ((role !== 'admin' && role !== 'approver' && role !== 'member') || !workspaceId) {
+    return res.status(401).json({ error: 'Unauthorized: user has no assigned role or workspace' });
   }
 
   (req as AuthenticatedRequest).user = {
     user_id: data.user.id,
     role,
-    workspace_id: workspaceId || '00000000-0000-0000-0000-000000000000',
+    workspace_id: workspaceId,
   };
 
   return next();

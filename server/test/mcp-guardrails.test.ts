@@ -2,6 +2,7 @@ import { authenticateMcpToken, checkExecutionGate } from '../src/services/mcp.js
 import { dispatchStepExecution } from '../src/services/integrations/http_adapters.js';
 import { resolveWorkspaceForWebhook } from '../src/routes/connectors.js';
 import { getTenantClient } from '../src/middleware/tenantClient.js';
+import { authenticate, type AuthenticatedRequest } from '../src/middleware/auth.js';
 import { supabase } from '../src/config/supabase.js';
 
 async function runMcpGuardrailsTestSuite() {
@@ -198,6 +199,38 @@ async function runMcpGuardrailsTestSuite() {
     }
   } catch (err) {
     console.error("❌ TEST 10 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 11: Missing Workspace Claim Token Rejection (Gap 1) ───
+  try {
+    let statusSent = 0;
+    let jsonSent: any = null;
+
+    const mockRes = {
+      status: (code: number) => {
+        statusSent = code;
+        return {
+          json: (data: any) => { jsonSent = data; }
+        };
+      }
+    } as any;
+
+    const mockReqMissingWorkspace = {
+      headers: { authorization: 'Bearer mock-token-without-workspace' }
+    } as any;
+
+    await authenticate(mockReqMissingWorkspace, mockRes, () => {});
+
+    if (statusSent === 401 && jsonSent?.error?.includes('Unauthorized')) {
+      console.log("✅ TEST 11 PASSED: Token missing valid workspace_id claim is strictly rejected with HTTP 401.");
+      passed++;
+    } else {
+      console.error("❌ TEST 11 FAILED: Missing workspace_id token was not rejected cleanly!", { statusSent, jsonSent });
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 11 EXCEPTION:", err);
     failed++;
   }
 
