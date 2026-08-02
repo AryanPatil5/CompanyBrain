@@ -101,8 +101,11 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
   }
 
   // 3. Decode standard JWT
-  const activeSecret = secretKey || 'fallback-secret-for-signing-token';
-  const decoded = verifyJWT(token, activeSecret);
+  if (!secretKey) {
+    return res.status(401).json({ error: 'Unauthorized: JWT_SECRET is not configured on the server.' });
+  }
+
+  const decoded = verifyJWT(token, secretKey);
 
   if (!decoded) {
     return res.status(401).json({ error: 'Unauthorized: invalid token signature' });

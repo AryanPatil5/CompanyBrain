@@ -179,7 +179,7 @@ export async function detectConflict(
       const { data: rpcMatches, error: rpcErr } = await supabase.rpc('match_sops_by_embedding', {
         query_embedding: queryEmbedding,
         filter_workspace_id: workspaceId,
-        match_threshold: 0.1,
+        match_threshold: 0.75,
         match_count: 5,
       });
 
