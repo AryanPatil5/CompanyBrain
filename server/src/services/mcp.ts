@@ -10,6 +10,46 @@ export interface McpSessionContext {
   trustRole: 'low_trust' | 'high_trust' | 'admin';
 }
 
+export interface GateCheckResult {
+  gated: boolean;
+  message?: string;
+  riskLevel?: string;
+  sopTitle?: string;
+  approvalStatus?: string;
+}
+
+/**
+ * Shared production gate check function used by get_sop_by_id, execute_sop_step, and guardrail test suites.
+ */
+export async function checkExecutionGate(
+  sop: { id: string; title: string; risk_level?: string; requires_human_gate?: boolean },
+  trustRole: 'low_trust' | 'high_trust' | 'admin'
+): Promise<GateCheckResult> {
+  const isHighRisk = sop.risk_level === 'High' || sop.risk_level === 'Critical' || !!sop.requires_human_gate;
+
+  if (isHighRisk && trustRole === 'low_trust') {
+    const { data: gateReq } = await supabase
+      .from('pending_approvals')
+      .select('id, status')
+      .eq('sop_id', sop.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!gateReq || gateReq.status !== 'approved') {
+      return {
+        gated: true,
+        riskLevel: sop.risk_level || 'High',
+        sopTitle: sop.title,
+        approvalStatus: gateReq ? gateReq.status : 'unrequested',
+        message: `HIGH/CRITICAL RISK GATE ENFORCED: Real-time human manager approval is required to execute SOP "${sop.title}". Invoke 'request_execution_approval' tool to submit an execution gate ticket to manager dashboard.`,
+      };
+    }
+  }
+
+  return { gated: false };
+}
+
 /**
  * Verifies a FastMCP token against public.agent_registry table.
  */
@@ -45,7 +85,7 @@ export async function authenticateMcpToken(token?: string): Promise<McpSessionCo
     // Non-fatal query catch
   }
 
-  // Priority 1 Fix: Fallback tokens strictly gated behind process.env.NODE_ENV !== 'production'
+  // Fallback tokens strictly gated behind process.env.NODE_ENV !== 'production'
   if (process.env.NODE_ENV !== 'production') {
     if (cleanToken === 'mcp-admin-key-99') {
       return { authenticated: true, agentId: 'admin-worker-01', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'admin' };
@@ -124,29 +164,17 @@ server.addTool({
       return JSON.stringify({ error: 'SOP not found or not yet approved by team leads.' });
     }
 
-    // Real-Time Execution Guardrail & Human Gate Enforcer
-    const isHighRisk = sop.risk_level === 'High' || sop.risk_level === 'Critical' || sop.requires_human_gate;
-
-    if (isHighRisk && session.trustRole === 'low_trust') {
-      const { data: gateReq } = await supabase
-        .from('pending_approvals')
-        .select('id, status')
-        .eq('sop_id', sopId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (!gateReq || gateReq.status !== 'approved') {
-        await logExecution(sopId, 'get_sop_by_id', { sopId, blocked: true }, 'blocked_gated', session.agentId);
-
-        return JSON.stringify({
-          gated: true,
-          risk_level: sop.risk_level,
-          requires_human_gate: true,
-          sop_title: sop.title,
-          message: `HIGH/CRITICAL RISK GATE ENFORCED: Real-time human manager approval is required to execute SOP "${sop.title}". Invoke 'request_execution_approval' tool to submit an execution gate ticket to manager dashboard.`,
-        });
-      }
+    // Call shared production checkExecutionGate function
+    const gateRes = await checkExecutionGate(sop, session.trustRole);
+    if (gateRes.gated) {
+      await logExecution(sopId, 'get_sop_by_id', { sopId, blocked: true }, 'blocked_gated', session.agentId);
+      return JSON.stringify({
+        gated: true,
+        risk_level: sop.risk_level,
+        requires_human_gate: true,
+        sop_title: sop.title,
+        message: gateRes.message,
+      });
     }
 
     await logExecution(sopId, 'get_sop_by_id', { sopId }, 'success', session.agentId);
@@ -215,7 +243,7 @@ server.addTool({
   },
 });
 
-// ─── Tool 3: Get SOP With Version History (Priority 2 Fix: Enforces Auth & Approved Status) ───
+// ─── Tool 3: Get SOP With Version History ─────────────────────
 
 server.addTool({
   name: 'get_sop_with_history',
@@ -225,13 +253,11 @@ server.addTool({
     mcpToken: z.string().describe('Authenticated FastMCP API token'),
   }),
   execute: async ({ sopId, mcpToken }) => {
-    // Priority 2 Fix: Require authentication
     const session = await authenticateMcpToken(mcpToken);
     if (!session.authenticated) {
       return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
     }
 
-    // Priority 2 Fix: Strictly filter for status = 'Approved'
     const { data: sop, error } = await supabase
       .from('skills_sops')
       .select('*')
@@ -312,7 +338,7 @@ server.addTool({
   },
 });
 
-// ─── Tool 5: Check Approval Status (Priority 4 Fix: Enforces Authentication) ───
+// ─── Tool 5: Check Approval Status ───────────────────────────
 
 server.addTool({
   name: 'check_approval_status',
@@ -322,7 +348,6 @@ server.addTool({
     mcpToken: z.string().describe('Authenticated FastMCP API token'),
   }),
   execute: async ({ approvalId, mcpToken }) => {
-    // Priority 4 Fix: Require authentication
     const session = await authenticateMcpToken(mcpToken);
     if (!session.authenticated) {
       return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
@@ -385,24 +410,14 @@ server.addTool({
       return JSON.stringify({ error: `SOP "${sop.title}" is in '${sop.status}' status. Only 'Approved' SOPs can be executed.` });
     }
 
-    // 3. Human-In-The-Loop Gate Check for High/Critical risk SOPs
-    const isHighRisk = sop.risk_level === 'High' || sop.risk_level === 'Critical' || sop.requires_human_gate;
-    if (isHighRisk && trustRole === 'low_trust') {
-      const { data: gateReq } = await supabase
-        .from('pending_approvals')
-        .select('id, status')
-        .eq('sop_id', sopId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (!gateReq || gateReq.status !== 'approved') {
-        await logExecution(sopId, 'execute_sop_step', { stepNumber, blocked: true }, 'blocked_gated', callerId);
-        return JSON.stringify({
-          error: `HUMAN GATE REQUIRED: SOP "${sop.title}" requires human manager approval before step execution. Please submit an execution ticket using 'request_execution_approval'.`,
-          approval_status: gateReq ? gateReq.status : 'unrequested',
-        });
-      }
+    // 3. Call shared production checkExecutionGate function
+    const gateRes = await checkExecutionGate(sop, trustRole);
+    if (gateRes.gated) {
+      await logExecution(sopId, 'execute_sop_step', { stepNumber, blocked: true }, 'blocked_gated', callerId);
+      return JSON.stringify({
+        error: `HUMAN GATE REQUIRED: SOP "${sop.title}" requires human manager approval before step execution. Please submit an execution ticket using 'request_execution_approval'.`,
+        approval_status: gateRes.approvalStatus,
+      });
     }
 
     // 4. Locate Step Definition
@@ -464,7 +479,7 @@ server.addTool({
   },
 });
 
-// ─── Tool 7: Log SOP Execution Outcome (Priority 3 Fix: Prevents Audit Spoofing) ───
+// ─── Tool 7: Log SOP Execution Outcome ──────────────────────
 
 server.addTool({
   name: 'log_sop_execution',
@@ -477,7 +492,6 @@ server.addTool({
     agentLabel: z.string().optional().describe('Optional display label or agent name'),
   }),
   execute: async ({ sopId, mcpToken, outcome, notes, agentLabel }) => {
-    // Priority 3 Fix: Authenticate session and use verified session.agentId to prevent audit spoofing
     const session = await authenticateMcpToken(mcpToken);
     if (!session.authenticated) {
       return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });

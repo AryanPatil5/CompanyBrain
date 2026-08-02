@@ -1,4 +1,4 @@
-import { authenticateMcpToken } from '../src/services/mcp.js';
+import { authenticateMcpToken, checkExecutionGate } from '../src/services/mcp.js';
 import { dispatchStepExecution } from '../src/services/integrations/http_adapters.js';
 import { supabase } from '../src/config/supabase.js';
 
@@ -25,58 +25,26 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 2: Low-Trust Agent Blocked on High-Risk SOP Without Gate Approval ───
+  // ─── Test 2: Low-Trust Agent Blocked on High-Risk SOP via Production checkExecutionGate ───
   try {
     const lowTrustSession = await authenticateMcpToken('mcp-lowtrust-key-01');
     if (lowTrustSession.trustRole === 'low_trust') {
-      // 1. Create a temporary High-Risk SOP in database
-      const { data: testSop } = await supabase
-        .from('skills_sops')
-        .insert({
-          title: 'High-Risk Guardrail Execution Test SOP',
-          category: 'Security',
-          trigger_condition: 'Emergency test trigger',
-          risk_level: 'High',
-          requires_human_gate: true,
-          status: 'Approved',
-          workspace_id: '00000000-0000-0000-0000-000000000000',
-          execution_steps: [{ step_number: 1, target_system: 'slack', action: 'post_alert' }],
-        })
-        .select()
-        .single();
+      const highRiskSop = {
+        id: '00000000-0000-0000-0000-000000000001',
+        title: 'High-Risk Guardrail Execution Test SOP',
+        risk_level: 'High',
+        requires_human_gate: true,
+      };
 
-      if (testSop) {
-        // 2. Perform the exact gate enforcement check as in execute_sop_step / get_sop_by_id
-        const isHighRisk = testSop.risk_level === 'High' || testSop.risk_level === 'Critical' || testSop.requires_human_gate;
-        let isGated = false;
+      // Call the exact exported production checkExecutionGate function from mcp.ts
+      const gateRes = await checkExecutionGate(highRiskSop, lowTrustSession.trustRole);
 
-        if (isHighRisk && lowTrustSession.trustRole === 'low_trust') {
-          const { data: gateReq } = await supabase
-            .from('pending_approvals')
-            .select('id, status')
-            .eq('sop_id', testSop.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-
-          if (!gateReq || gateReq.status !== 'approved') {
-            isGated = true;
-          }
-        }
-
-        // Clean up test SOP
-        await supabase.from('skills_sops').delete().eq('id', testSop.id);
-
-        if (isGated) {
-          console.log("✅ TEST 2 PASSED: Low-trust agent strictly blocked on High-Risk SOP without prior gate approval.");
-          passed++;
-        } else {
-          console.error("❌ TEST 2 FAILED: Gate enforcement failed to block low-trust agent execution!");
-          failed++;
-        }
-      } else {
-        console.log("✅ TEST 2 PASSED: Low-trust agent guardrail check verified.");
+      if (gateRes.gated && gateRes.message?.includes('HIGH/CRITICAL RISK GATE ENFORCED')) {
+        console.log("✅ TEST 2 PASSED: Exported production checkExecutionGate strictly blocked low-trust agent on High-Risk SOP.");
         passed++;
+      } else {
+        console.error("❌ TEST 2 FAILED: Production checkExecutionGate allowed low-trust execution!", gateRes);
+        failed++;
       }
     } else {
       console.error("❌ TEST 2 FAILED: Low-trust role not assigned.");
@@ -87,12 +55,18 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 3: Approved Manager Gate Ticket Execution Allowance ───
+  // ─── Test 3: Approved Manager Gate Ticket / Admin Execution Allowance ───
   try {
     const adminSession = await authenticateMcpToken('mcp-admin-key-99');
     if (adminSession.authenticated && adminSession.trustRole === 'admin') {
-      console.log("✅ TEST 3 PASSED: Approved gate ticket / admin session correctly allows execution to proceed.");
-      passed++;
+      const gateRes = await checkExecutionGate({ id: 'dummy', title: 'Test SOP', risk_level: 'High' }, adminSession.trustRole);
+      if (!gateRes.gated) {
+        console.log("✅ TEST 3 PASSED: Approved gate / admin session correctly allows execution to proceed.");
+        passed++;
+      } else {
+        console.error("❌ TEST 3 FAILED: Admin session was gated!", gateRes);
+        failed++;
+      }
     } else {
       console.error("❌ TEST 3 FAILED: Admin session role not verified.");
       failed++;
