@@ -1,18 +1,26 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../config/supabase.js';
 import { createVersion, confirmSOP, markStaleSOPs } from '../services/freshness.js';
+import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = Router();
+
+// Apply authentication middleware globally to all SOP routes
+router.use(authenticate);
 
 // ─── GET all SOPs ────────────────────────────────────────────
 
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { workspace_id, category, status } = req.query;
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+    const { category, status } = req.query;
 
     let query = supabase.from('skills_sops').select('*');
 
-    if (workspace_id) query = query.eq('workspace_id', workspace_id as string);
+    // Scoped strictly by the authenticated user's workspace_id
+    query = query.eq('workspace_id', workspaceId);
+    
     if (category) query = query.eq('category', category as string);
     if (status) query = query.eq('status', status as string);
 
@@ -31,11 +39,16 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 
 // ─── GET pending agent approvals ─────────────────────────────
 
-router.get('/approvals', async (_req: Request, res: Response): Promise<void> => {
+router.get('/approvals', async (req: Request, res: Response): Promise<void> => {
   try {
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+
+    // Scoped strictly by joined skills_sops workspace_id (using inner join syntax)
     const { data, error } = await supabase
       .from('pending_approvals')
-      .select('*, skills_sops(title, category, trigger_condition, execution_steps)')
+      .select('*, skills_sops!inner(title, category, trigger_condition, execution_steps, workspace_id)')
+      .eq('skills_sops.workspace_id', workspaceId)
       .eq('status', 'pending')
       .order('created_at', { ascending: false });
 
@@ -52,13 +65,34 @@ router.get('/approvals', async (_req: Request, res: Response): Promise<void> => 
 
 // ─── PATCH resolve approval (Approve or Reject) ──────────────
 
-router.patch('/approvals/:approvalId', async (req: Request, res: Response): Promise<void> => {
+router.patch('/approvals/:approvalId', requireRole(['admin', 'approver']), async (req: Request, res: Response): Promise<void> => {
   try {
     const { approvalId } = req.params;
     const { status, reason } = req.body; // 'approved' or 'rejected'
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
 
     if (!['approved', 'rejected'].includes(status)) {
       res.status(400).json({ error: 'Status must be "approved" or "rejected"' });
+      return;
+    }
+
+    // Verify ownership of the underlying SOP before modifying approval record
+    const { data: checkApproval, error: checkErr } = await supabase
+      .from('pending_approvals')
+      .select('*, skills_sops!inner(workspace_id)')
+      .eq('id', approvalId)
+      .single();
+
+    if (checkErr || !checkApproval) {
+      res.status(404).json({ error: 'Approval request not found' });
+      return;
+    }
+
+    // TS helper to access nested joined table columns safely
+    const joinedSop = checkApproval.skills_sops as any;
+    if (joinedSop?.workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Forbidden: approval request belongs to another workspace' });
       return;
     }
 
@@ -86,11 +120,15 @@ router.patch('/approvals/:approvalId', async (req: Request, res: Response): Prom
 
 // ─── GET analytics ───────────────────────────────────────────
 
-router.get('/analytics', async (_req: Request, res: Response): Promise<void> => {
+router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
   try {
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+
     const { data: sops, error: sopErr } = await supabase
       .from('skills_sops')
-      .select('id, title, status, category, is_stale, risk_level');
+      .select('id, title, status, category, is_stale, risk_level')
+      .eq('workspace_id', workspaceId);
 
     if (sopErr) {
       res.status(500).json({ error: sopErr.message });
@@ -112,23 +150,27 @@ router.get('/analytics', async (_req: Request, res: Response): Promise<void> => 
       if (s.is_stale) staleCount++;
     }
 
-    // Pending agent execution approvals count
+    // Pending agent execution approvals count for this workspace
     const { count: pendingApprovalsCount } = await supabase
       .from('pending_approvals')
-      .select('id', { count: 'exact', head: true })
+      .select('id, skills_sops!inner(workspace_id)', { count: 'exact', head: true })
+      .eq('skills_sops.workspace_id', workspaceId)
       .eq('status', 'pending');
 
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
+    // Scoped execution logs matching workspace_id
     const { count: recentExecutions } = await supabase
       .from('execution_logs')
-      .select('id', { count: 'exact', head: true })
+      .select('id, skills_sops!inner(workspace_id)', { count: 'exact', head: true })
+      .eq('skills_sops.workspace_id', workspaceId)
       .gte('created_at', weekAgo.toISOString());
 
     const { data: threads } = await supabase
       .from('raw_threads')
-      .select('source');
+      .select('source')
+      .eq('workspace_id', workspaceId);
 
     const bySources: Record<string, number> = {};
     for (const t of threads || []) {
@@ -157,8 +199,34 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { title, category, trigger_condition, preconditions, execution_steps, status, risk_level, requires_human_gate } = req.body;
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+
+    // Check if the SOP belongs to the user's workspace
+    const { data: checkSop } = await supabase
+      .from('skills_sops')
+      .select('workspace_id')
+      .eq('id', id)
+      .single();
+
+    if (!checkSop) {
+      res.status(404).json({ error: 'SOP not found' });
+      return;
+    }
+
+    if (checkSop.workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
 
     const isApproval = status === 'Approved';
+
+    // Restrict approval status updates to admin and approver roles
+    if (isApproval && !['admin', 'approver'].includes(user.role)) {
+      res.status(403).json({ error: 'Forbidden: only admins or approvers can approve SOPs' });
+      return;
+    }
+
     await createVersion(id, 'user', isApproval ? 'approval' : 'manual_edit');
 
     const updatePayload: Record<string, any> = { updated_at: new Date().toISOString() };
@@ -198,7 +266,28 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
 
 router.post('/:id/confirm', async (req: Request, res: Response): Promise<void> => {
   try {
-    const success = await confirmSOP(req.params.id);
+    const { id } = req.params;
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+
+    // Check if the SOP belongs to the user's workspace
+    const { data: checkSop } = await supabase
+      .from('skills_sops')
+      .select('workspace_id')
+      .eq('id', id)
+      .single();
+
+    if (!checkSop) {
+      res.status(404).json({ error: 'SOP not found' });
+      return;
+    }
+
+    if (checkSop.workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const success = await confirmSOP(id);
     if (!success) {
       res.status(500).json({ error: 'Failed to confirm SOP' });
       return;
@@ -213,10 +302,31 @@ router.post('/:id/confirm', async (req: Request, res: Response): Promise<void> =
 
 router.get('/:id/versions', async (req: Request, res: Response): Promise<void> => {
   try {
+    const { id } = req.params;
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+
+    // Check if the SOP belongs to the user's workspace
+    const { data: checkSop } = await supabase
+      .from('skills_sops')
+      .select('workspace_id')
+      .eq('id', id)
+      .single();
+
+    if (!checkSop) {
+      res.status(404).json({ error: 'SOP not found' });
+      return;
+    }
+
+    if (checkSop.workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
     const { data, error } = await supabase
       .from('sop_versions')
       .select('*')
-      .eq('sop_id', req.params.id)
+      .eq('sop_id', id)
       .order('version_number', { ascending: false });
 
     if (error) {
@@ -227,6 +337,47 @@ router.get('/:id/versions', async (req: Request, res: Response): Promise<void> =
     res.json({ versions: data });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch version history' });
+  }
+});
+
+// ─── DELETE SOP ──────────────────────────────────────────────
+
+router.delete('/:id', requireRole(['admin', 'approver']), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+
+    // Check if the SOP belongs to the user's workspace
+    const { data: checkSop } = await supabase
+      .from('skills_sops')
+      .select('workspace_id')
+      .eq('id', id)
+      .single();
+
+    if (!checkSop) {
+      res.status(404).json({ error: 'SOP not found' });
+      return;
+    }
+
+    if (checkSop.workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const { error } = await supabase
+      .from('skills_sops')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+
+    res.json({ message: 'SOP deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete SOP' });
   }
 });
 

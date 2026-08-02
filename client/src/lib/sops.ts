@@ -107,6 +107,10 @@ export const MOCK_SOPS: Sop[] = [
   },
 ];
 
+export function getToken(): string {
+  return localStorage.getItem("auth_token") || "mock-admin-token";
+}
+
 function mapBackendSopToFrontend(raw: any): Sop {
   return {
     id: raw.id,
@@ -139,6 +143,7 @@ export async function fetchSops(): Promise<{ sops: Sop[]; live: boolean }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     const res = await fetch("http://localhost:5001/api/sops", {
+      headers: { "Authorization": `Bearer ${getToken()}` },
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -164,7 +169,10 @@ export async function approveSopApi(id: string): Promise<boolean> {
   try {
     const res = await fetch(`http://localhost:5001/api/sops/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${getToken()}`,
+      },
       body: JSON.stringify({ status: "Approved" }),
     });
     return res.ok;
@@ -178,6 +186,7 @@ export async function confirmSopApi(id: string): Promise<boolean> {
   try {
     const res = await fetch(`http://localhost:5001/api/sops/${id}/confirm`, {
       method: "POST",
+      headers: { "Authorization": `Bearer ${getToken()}` },
     });
     return res.ok;
   } catch (err) {
@@ -191,6 +200,7 @@ export async function fetchAnalytics(): Promise<Analytics | null> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     const res = await fetch("http://localhost:5001/api/sops/analytics", {
+      headers: { "Authorization": `Bearer ${getToken()}` },
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -204,7 +214,9 @@ export async function fetchAnalytics(): Promise<Analytics | null> {
 
 export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
   try {
-    const res = await fetch(`http://localhost:5001/api/sops/${sopId}/versions`);
+    const res = await fetch(`http://localhost:5001/api/sops/${sopId}/versions`, {
+      headers: { "Authorization": `Bearer ${getToken()}` },
+    });
     if (!res.ok) return [];
     const data = await res.json();
     return data.versions || [];
@@ -215,7 +227,9 @@ export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
 
 export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
   try {
-    const res = await fetch("http://localhost:5001/api/sops/approvals");
+    const res = await fetch("http://localhost:5001/api/sops/approvals", {
+      headers: { "Authorization": `Bearer ${getToken()}` },
+    });
     if (!res.ok) return [];
     const data = await res.json();
     return data.approvals || [];
@@ -228,7 +242,10 @@ export async function resolveApprovalApi(approvalId: string, status: "approved" 
   try {
     const res = await fetch(`http://localhost:5001/api/sops/approvals/${approvalId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${getToken()}`,
+      },
       body: JSON.stringify({ status }),
     });
     return res.ok;
@@ -247,9 +264,11 @@ export async function teachBrainApi(payload: {
   try {
     const res = await fetch("http://localhost:5001/api/ingestion/webhook/teach", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${getToken()}`,
+      },
       body: JSON.stringify({
-        workspace_id: "00000000-0000-0000-0000-000000000000",
         ...payload,
       }),
     });

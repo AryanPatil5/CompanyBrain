@@ -13,6 +13,7 @@ import {
 } from '../services/connectors.js';
 import { detectConflict, createVersion } from '../services/freshness.js';
 import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature } from './connectors.js';
+import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -225,15 +226,20 @@ router.post('/webhook/database', async (req: Request, res: Response): Promise<vo
   }
 });
 
-router.post('/webhook/teach', async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/teach', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const payload = normalizeDirectTeach(req.body);
+    const user = (req as AuthenticatedRequest).user!;
+    const payload = normalizeDirectTeach({
+      ...req.body,
+      workspace_id: user.workspace_id
+    });
     if (!payload) {
       res.status(400).json({ error: 'Invalid tacit knowledge payload. Ensure title and description are provided.' });
       return;
     }
     await processThread(payload, res);
   } catch (error) {
+    console.error('[Direct Teach Ingestion Error]:', error);
     res.status(500).json({ error: 'Internal server error during Tacit Knowledge ingestion.' });
   }
 });
