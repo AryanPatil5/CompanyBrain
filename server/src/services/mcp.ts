@@ -45,15 +45,17 @@ export async function authenticateMcpToken(token?: string): Promise<McpSessionCo
     // Non-fatal query catch
   }
 
-  // Known fallback keys for development testing
-  if (cleanToken === 'mcp-admin-key-99') {
-    return { authenticated: true, agentId: 'admin-worker-01', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'admin' };
-  }
-  if (cleanToken === 'mcp-hightrust-key-02') {
-    return { authenticated: true, agentId: 'trusted-runner-02', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'high_trust' };
-  }
-  if (cleanToken === 'mcp-lowtrust-key-01') {
-    return { authenticated: true, agentId: 'subagent-lowtrust', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'low_trust' };
+  // Priority 1 Fix: Fallback tokens strictly gated behind process.env.NODE_ENV !== 'production'
+  if (process.env.NODE_ENV !== 'production') {
+    if (cleanToken === 'mcp-admin-key-99') {
+      return { authenticated: true, agentId: 'admin-worker-01', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'admin' };
+    }
+    if (cleanToken === 'mcp-hightrust-key-02') {
+      return { authenticated: true, agentId: 'trusted-runner-02', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'high_trust' };
+    }
+    if (cleanToken === 'mcp-lowtrust-key-01') {
+      return { authenticated: true, agentId: 'subagent-lowtrust', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'low_trust' };
+    }
   }
 
   return unauthenticated;
@@ -213,31 +215,32 @@ server.addTool({
   },
 });
 
-// ─── Tool 3: Get SOP With Version History ─────────────────────
+// ─── Tool 3: Get SOP With Version History (Priority 2 Fix: Enforces Auth & Approved Status) ───
 
 server.addTool({
   name: 'get_sop_with_history',
-  description: 'Retrieves an approved SOP alongside its complete version evolution history and change reasons.',
+  description: 'Retrieves an approved SOP alongside its complete version evolution history and change reasons. Only returns approved SOPs.',
   parameters: z.object({
-    sopId: z.string().uuid().describe('The UUID of the SOP'),
-    mcpToken: z.string().optional().describe('FastMCP API token'),
+    sopId: z.string().uuid().describe('The UUID of the approved SOP'),
+    mcpToken: z.string().describe('Authenticated FastMCP API token'),
   }),
   execute: async ({ sopId, mcpToken }) => {
-    if (mcpToken) {
-      const session = await authenticateMcpToken(mcpToken);
-      if (!session.authenticated) {
-        return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
-      }
+    // Priority 2 Fix: Require authentication
+    const session = await authenticateMcpToken(mcpToken);
+    if (!session.authenticated) {
+      return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
     }
 
-    const { data: sop } = await supabase
+    // Priority 2 Fix: Strictly filter for status = 'Approved'
+    const { data: sop, error } = await supabase
       .from('skills_sops')
       .select('*')
       .eq('id', sopId)
+      .eq('status', 'Approved')
       .single();
 
-    if (!sop) {
-      return JSON.stringify({ error: 'SOP not found' });
+    if (error || !sop) {
+      return JSON.stringify({ error: 'SOP not found or not yet approved by team leads.' });
     }
 
     const { data: versions } = await supabase
@@ -309,15 +312,22 @@ server.addTool({
   },
 });
 
-// ─── Tool 5: Check Approval Status ───────────────────────────
+// ─── Tool 5: Check Approval Status (Priority 4 Fix: Enforces Authentication) ───
 
 server.addTool({
   name: 'check_approval_status',
   description: 'Checks the resolution status of a pending human manager approval ticket.',
   parameters: z.object({
     approvalId: z.string().uuid().describe('The UUID of the pending approval request'),
+    mcpToken: z.string().describe('Authenticated FastMCP API token'),
   }),
-  execute: async ({ approvalId }) => {
+  execute: async ({ approvalId, mcpToken }) => {
+    // Priority 4 Fix: Require authentication
+    const session = await authenticateMcpToken(mcpToken);
+    if (!session.authenticated) {
+      return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
+    }
+
     const { data, error } = await supabase
       .from('pending_approvals')
       .select('id, status, reason, resolved_at, sop_id')
@@ -454,20 +464,27 @@ server.addTool({
   },
 });
 
-// ─── Tool 7: Log SOP Execution Outcome ──────────────────────
+// ─── Tool 7: Log SOP Execution Outcome (Priority 3 Fix: Prevents Audit Spoofing) ───
 
 server.addTool({
   name: 'log_sop_execution',
-  description: 'Reports the outcome after an AI agent has executed an SOP procedure.',
+  description: 'Reports the outcome after an AI agent has executed an SOP procedure. Requires valid FastMCP API token to prevent identity spoofing.',
   parameters: z.object({
     sopId: z.string().uuid().describe('The UUID of the SOP that was executed'),
-    agentId: z.string().describe('Identifier for the agent that executed the SOP'),
+    mcpToken: z.string().describe('Authenticated FastMCP API token'),
     outcome: z.enum(['success', 'partial', 'error']).describe('Result of the execution'),
     notes: z.string().optional().describe('Optional notes about the execution'),
+    agentLabel: z.string().optional().describe('Optional display label or agent name'),
   }),
-  execute: async ({ sopId, agentId, outcome, notes }) => {
-    await logExecution(sopId, 'log_sop_execution', { notes }, outcome, agentId);
-    return JSON.stringify({ logged: true, sop_id: sopId, outcome });
+  execute: async ({ sopId, mcpToken, outcome, notes, agentLabel }) => {
+    // Priority 3 Fix: Authenticate session and use verified session.agentId to prevent audit spoofing
+    const session = await authenticateMcpToken(mcpToken);
+    if (!session.authenticated) {
+      return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
+    }
+
+    await logExecution(sopId, 'log_sop_execution', { notes, agent_label: agentLabel }, outcome, session.agentId);
+    return JSON.stringify({ logged: true, sop_id: sopId, authenticated_agent_id: session.agentId, outcome });
   },
 });
 

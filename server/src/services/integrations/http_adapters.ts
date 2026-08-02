@@ -258,6 +258,15 @@ export async function postgresAdapter(
 
   const queryValues = template.paramKeys.map((key) => parameters?.[key] ?? null);
 
+  if (isProd && !process.env.DATABASE_URL) {
+    return {
+      success: false,
+      status_code: 401,
+      response_data: null,
+      error: 'Credential not configured',
+    };
+  }
+
   if (isProd && process.env.DATABASE_URL) {
     const { Client } = pg;
     const client = new Client({ connectionString: process.env.DATABASE_URL });

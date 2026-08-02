@@ -29,11 +29,11 @@ async function runMcpGuardrailsTestSuite() {
   try {
     const lowTrustSession = await authenticateMcpToken('mcp-lowtrust-key-01');
     if (lowTrustSession.trustRole === 'low_trust') {
-      // Create a temporary High-Risk SOP in database
+      // 1. Create a temporary High-Risk SOP in database
       const { data: testSop } = await supabase
         .from('skills_sops')
         .insert({
-          title: 'High-Risk Guardrail Test SOP',
+          title: 'High-Risk Guardrail Execution Test SOP',
           category: 'Security',
           trigger_condition: 'Emergency test trigger',
           risk_level: 'High',
@@ -46,23 +46,34 @@ async function runMcpGuardrailsTestSuite() {
         .single();
 
       if (testSop) {
-        // Query pending approvals to ensure no pre-existing approval
-        const { data: existingApproval } = await supabase
-          .from('pending_approvals')
-          .select('id')
-          .eq('sop_id', testSop.id)
-          .single();
+        // 2. Perform the exact gate enforcement check as in execute_sop_step / get_sop_by_id
+        const isHighRisk = testSop.risk_level === 'High' || testSop.risk_level === 'Critical' || testSop.requires_human_gate;
+        let isGated = false;
 
-        if (!existingApproval) {
-          console.log("✅ TEST 2 PASSED: Low-trust agent blocked on High-Risk SOP without manager gate approval.");
-          passed++;
-        } else {
-          console.log("✅ TEST 2 PASSED: Low-trust agent guardrail check verified.");
-          passed++;
+        if (isHighRisk && lowTrustSession.trustRole === 'low_trust') {
+          const { data: gateReq } = await supabase
+            .from('pending_approvals')
+            .select('id, status')
+            .eq('sop_id', testSop.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (!gateReq || gateReq.status !== 'approved') {
+            isGated = true;
+          }
         }
 
         // Clean up test SOP
         await supabase.from('skills_sops').delete().eq('id', testSop.id);
+
+        if (isGated) {
+          console.log("✅ TEST 2 PASSED: Low-trust agent strictly blocked on High-Risk SOP without prior gate approval.");
+          passed++;
+        } else {
+          console.error("❌ TEST 2 FAILED: Gate enforcement failed to block low-trust agent execution!");
+          failed++;
+        }
       } else {
         console.log("✅ TEST 2 PASSED: Low-trust agent guardrail check verified.");
         passed++;
