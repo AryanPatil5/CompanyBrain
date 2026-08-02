@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import ingestionRouter from './routes/ingestion.js';
 import sopsRouter from './routes/sops.js';
 import { startMCPServer } from './services/mcp.js';
-import { startCrawlerWorker } from './services/crawler.js';
+import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
 
 dotenv.config();
 
@@ -45,7 +45,7 @@ app.get('/health', (req, res) => {
 });
 
 // Start Express API Server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[INFO] Company Brain REST API running at http://localhost:${PORT}`);
 });
 
@@ -54,3 +54,16 @@ startMCPServer();
 
 // Start Background Knowledge Crawler Worker
 startCrawlerWorker();
+
+// Graceful Shutdown Handlers
+const shutdown = () => {
+  console.log('[INFO] Gracefully shutting down Express server...');
+  stopCrawlerWorker();
+  server.close(() => {
+    console.log('[INFO] Server closed and port released.');
+    process.exit(0);
+  });
+};
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
