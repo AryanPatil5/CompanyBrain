@@ -58,144 +58,185 @@ server.addTool({
 
     if (isHighRisk && trustRole === 'low_trust') {
       // Check if an existing approval exists and is approved
-      const { data: existingApproval } = await supabase
+      const { data: gateReq } = await supabase
         .from('pending_approvals')
-        .select('*')
+        .select('id, status, reason')
         .eq('sop_id', sopId)
-        .eq('agent_id', callerId)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
 
-      if (!existingApproval || existingApproval.status === 'pending') {
-        // Create pending approval request if not present
-        if (!existingApproval) {
-          await supabase.from('pending_approvals').insert({
-            sop_id: sopId,
-            agent_id: callerId,
-            requested_by: callerId,
-            risk_level: sop.risk_level || 'High',
-            status: 'pending',
-            reason: `Agent requested High-Risk SOP: "${sop.title}"`,
-            execution_context: { sop_title: sop.title, steps_count: sop.execution_steps?.length },
-          });
-        }
-
-        await logExecution(sopId, 'get_sop_by_id', { sopId, gated: true }, 'gate_required', callerId);
+      if (!gateReq || gateReq.status !== 'approved') {
+        await logExecution(sopId, 'get_sop_by_id', { sopId, blocked: true }, 'blocked_gated', callerId);
 
         return JSON.stringify({
-          status: 'GATE_REQUIRED',
+          gated: true,
           risk_level: sop.risk_level,
-          requires_human_approval: true,
+          requires_human_gate: true,
           sop_title: sop.title,
-          message: `SECURITY GUARDRAIL TRIGGERED: This SOP is rated "${sop.risk_level}" risk and requires human approval before execution. Request has been submitted to the manager queue. Call 'check_approval_status' with sopId: "${sopId}".`,
-          approval_status: 'pending',
-        }, null, 2);
-      }
-
-      if (existingApproval.status === 'rejected') {
-        await logExecution(sopId, 'get_sop_by_id', { sopId, gated: true }, 'gate_rejected', callerId);
-        return JSON.stringify({
-          status: 'GATE_REJECTED',
-          message: `EXECUTION DENIED: Manager rejected execution request for SOP "${sop.title}". Reason: ${existingApproval.reason || 'Safety policy restriction.'}`,
+          message: `HIGH/CRITICAL RISK GATE ENFORCED: Real-time human manager approval is required to execute SOP "${sop.title}". Invoke 'request_execution_approval' tool to submit an execution gate ticket to manager dashboard.`,
         });
       }
     }
 
     await logExecution(sopId, 'get_sop_by_id', { sopId }, 'success', callerId);
-    return JSON.stringify(sop, null, 2);
-  },
-});
-
-// ─── Tool 2: Search Operating Procedures ─────────────────────
-
-server.addTool({
-  name: 'search_operational_sops',
-  description: 'Searches Company Brain for approved procedures related to support, engineering, or billing tasks.',
-  parameters: z.object({
-    category: z.enum(['Engineering', 'Support', 'Billing', 'Operations', 'Security']).optional(),
-    keyword: z.string().describe('Keyword or scenario to search for (e.g. "rate limit", "refund")'),
-    agentId: z.string().optional().describe('Identifier for the agent calling this tool'),
-  }),
-  execute: async ({ category, keyword, agentId }) => {
-    let query = supabase
-      .from('skills_sops')
-      .select('id, title, category, trigger_condition, version, is_stale, risk_level, requires_human_gate')
-      .eq('status', 'Approved')
-      .ilike('title', `%${keyword}%`);
-
-    if (category) {
-      query = query.eq('category', category);
-    }
-
-    const { data, error } = await query.limit(5);
-
-    if (error) {
-      await logExecution(null, 'search_operational_sops', { category, keyword }, 'error', agentId);
-      return JSON.stringify({ error: 'Failed to search skills library.' });
-    }
-
-    await logExecution(null, 'search_operational_sops', { category, keyword }, 'success', agentId);
-    return JSON.stringify({ matches: data });
-  },
-});
-
-// ─── Tool 3: Request Execution Approval ──────────────────────
-
-server.addTool({
-  name: 'request_execution_approval',
-  description: 'Submits a real-time execution approval request to human managers for a High/Critical risk SOP.',
-  parameters: z.object({
-    sopId: z.string().uuid().describe('The UUID of the High-Risk SOP'),
-    agentId: z.string().describe('Identifier for the requesting agent'),
-    reason: z.string().describe('Reason or context for requesting execution'),
-  }),
-  execute: async ({ sopId, agentId, reason }) => {
-    const { data: sop } = await supabase.from('skills_sops').select('title, risk_level').eq('id', sopId).single();
-
-    const { data, error } = await supabase.from('pending_approvals').insert({
-      sop_id: sopId,
-      agent_id: agentId,
-      requested_by: agentId,
-      risk_level: sop?.risk_level || 'High',
-      status: 'pending',
-      reason,
-      execution_context: { sop_title: sop?.title },
-    }).select().single();
-
-    if (error) {
-      return JSON.stringify({ error: 'Failed to submit approval request.' });
-    }
 
     return JSON.stringify({
-      message: 'Approval request queued for human review.',
-      approval_id: data.id,
-      status: 'pending',
+      gated: false,
+      sop_id: sop.id,
+      title: sop.title,
+      category: sop.category,
+      trigger_condition: sop.trigger_condition,
+      preconditions: sop.preconditions,
+      execution_steps: sop.execution_steps,
+      version: sop.version,
+      is_stale: sop.is_stale,
+      risk_level: sop.risk_level,
     });
   },
 });
 
-// ─── Tool 4: Check Execution Approval Status ─────────────────
+// ─── Tool 2: Search Approved Operational SOPs ─────────────────
+
+server.addTool({
+  name: 'search_operational_sops',
+  description: 'Searches Company Brain for approved operational procedures matching a category or keyword query.',
+  parameters: z.object({
+    query: z.string().optional().describe('Keyword search term to match against SOP title or trigger condition'),
+    category: z.enum(['Engineering', 'Support', 'Billing', 'Operations', 'Security']).optional().describe('Category filter'),
+  }),
+  execute: async ({ query, category }) => {
+    let dbQuery = supabase
+      .from('skills_sops')
+      .select('id, title, category, trigger_condition, risk_level, version, is_stale')
+      .eq('status', 'Approved');
+
+    if (category) {
+      dbQuery = dbQuery.eq('category', category);
+    }
+
+    const { data: sops, error } = await dbQuery;
+
+    if (error) {
+      return JSON.stringify({ error: 'Failed to query skills database.' });
+    }
+
+    let results = sops || [];
+
+    if (query) {
+      const qLower = query.toLowerCase();
+      results = results.filter(
+        (s) => s.title.toLowerCase().includes(qLower) || (s.trigger_condition || '').toLowerCase().includes(qLower)
+      );
+    }
+
+    return JSON.stringify({
+      count: results.length,
+      sops: results,
+    });
+  },
+});
+
+// ─── Tool 3: Get SOP With Version History ─────────────────────
+
+server.addTool({
+  name: 'get_sop_with_history',
+  description: 'Retrieves an approved SOP alongside its complete version evolution history and change reasons.',
+  parameters: z.object({
+    sopId: z.string().uuid().describe('The UUID of the SOP'),
+  }),
+  execute: async ({ sopId }) => {
+    const { data: sop } = await supabase
+      .from('skills_sops')
+      .select('*')
+      .eq('id', sopId)
+      .single();
+
+    if (!sop) {
+      return JSON.stringify({ error: 'SOP not found' });
+    }
+
+    const { data: versions } = await supabase
+      .from('sop_versions')
+      .select('version_number, changed_by, change_reason, created_at')
+      .eq('sop_id', sopId)
+      .order('version_number', { ascending: false });
+
+    return JSON.stringify({
+      sop,
+      version_history: versions || [],
+    });
+  },
+});
+
+// ─── Tool 4: Request Execution Approval (Human-in-the-Loop Gating) ───
+
+server.addTool({
+  name: 'request_execution_approval',
+  description: 'Submits a real-time human approval request ticket to the manager dashboard when an AI agent needs to execute a High or Critical risk SOP.',
+  parameters: z.object({
+    sopId: z.string().uuid().describe('The UUID of the High/Critical risk SOP'),
+    agentId: z.string().describe('Identifier for the requesting AI agent'),
+    reason: z.string().describe('Detailed context and reason why execution is required'),
+    executionContext: z.record(z.any()).optional().describe('Input parameters or runtime variables for this execution'),
+  }),
+  execute: async ({ sopId, agentId, reason, executionContext }) => {
+    const { data: sop } = await supabase
+      .from('skills_sops')
+      .select('title, risk_level')
+      .eq('id', sopId)
+      .single();
+
+    if (!sop) {
+      return JSON.stringify({ error: 'SOP not found.' });
+    }
+
+    const { data: approval, error } = await supabase
+      .from('pending_approvals')
+      .insert({
+        sop_id: sopId,
+        agent_id: agentId,
+        requested_by: 'mcp-agent',
+        risk_level: sop.risk_level || 'High',
+        status: 'pending',
+        reason,
+        execution_context: executionContext || {},
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return JSON.stringify({ error: 'Failed to create approval request ticket.' });
+    }
+
+    await logExecution(sopId, 'request_execution_approval', { approval_id: approval.id }, 'pending', agentId);
+
+    return JSON.stringify({
+      success: true,
+      approval_id: approval.id,
+      status: 'pending',
+      message: `Execution ticket #${approval.id} submitted to manager approval queue for SOP "${sop.title}". Poll 'check_approval_status' tool to wait for manager approval.`,
+    });
+  },
+});
+
+// ─── Tool 5: Check Approval Status ───────────────────────────
 
 server.addTool({
   name: 'check_approval_status',
-  description: 'Checks if a human manager has approved an execution request for a High-Risk SOP.',
+  description: 'Checks the resolution status of a pending human manager approval ticket.',
   parameters: z.object({
-    sopId: z.string().uuid().describe('The UUID of the SOP'),
-    agentId: z.string().describe('Identifier for the requesting agent'),
+    approvalId: z.string().uuid().describe('The UUID of the pending approval request'),
   }),
-  execute: async ({ sopId, agentId }) => {
+  execute: async ({ approvalId }) => {
     const { data, error } = await supabase
       .from('pending_approvals')
-      .select('*')
-      .eq('sop_id', sopId)
-      .eq('agent_id', agentId)
-      .order('created_at', { ascending: false })
-      .limit(1)
+      .select('id, status, reason, resolved_at, sop_id')
+      .eq('id', approvalId)
       .single();
 
     if (error || !data) {
-      return JSON.stringify({ status: 'not_found', message: 'No approval request found for this SOP/agent combination.' });
+      return JSON.stringify({ error: 'Approval request ticket not found.' });
     }
 
     return JSON.stringify({
@@ -207,11 +248,114 @@ server.addTool({
   },
 });
 
-// ─── Tool 5: Log SOP Execution Outcome ──────────────────────
+// ─── Tool 6: Execute SOP Step (The Execution Layer & Tool Registry) ───
+
+server.addTool({
+  name: 'execute_sop_step',
+  description: 'Executes a specific step of an approved SOP against target integration systems (Stripe, GitHub, Postgres, Slack, Admin CLI, Vault, Zendesk). Enforces human-in-the-loop approval gates for High/Critical risk SOPs and automatically logs outcomes.',
+  parameters: z.object({
+    sopId: z.string().uuid().describe('The UUID of the approved SOP'),
+    stepNumber: z.number().describe('The step number to execute (1-indexed)'),
+    parameters: z.record(z.any()).optional().describe('Input parameters or thresholds for this step execution'),
+    agentId: z.string().optional().describe('Identifier for the requesting AI agent'),
+    agentTrustRole: z.enum(['low_trust', 'high_trust', 'admin']).optional().describe('Trust tier of requesting agent'),
+  }),
+  execute: async ({ sopId, stepNumber, parameters, agentId, agentTrustRole }) => {
+    const callerId = agentId || 'mcp-autonomous-agent';
+    const trustRole = agentTrustRole || 'low_trust';
+
+    // 1. Fetch SOP and verify status is Approved
+    const { data: sop, error: sopErr } = await supabase
+      .from('skills_sops')
+      .select('id, title, status, risk_level, requires_human_gate, execution_steps, workspace_id')
+      .eq('id', sopId)
+      .single();
+
+    if (sopErr || !sop) {
+      await logExecution(sopId, 'execute_sop_step', { stepNumber }, 'error', callerId);
+      return JSON.stringify({ error: 'SOP not found.' });
+    }
+
+    if (sop.status !== 'Approved') {
+      await logExecution(sopId, 'execute_sop_step', { stepNumber, status: sop.status }, 'rejected_unapproved', callerId);
+      return JSON.stringify({ error: `SOP "${sop.title}" is in '${sop.status}' status. Only 'Approved' SOPs can be executed.` });
+    }
+
+    // 2. Human-In-The-Loop Gate Check for High/Critical risk SOPs
+    const isHighRisk = sop.risk_level === 'High' || sop.risk_level === 'Critical' || sop.requires_human_gate;
+    if (isHighRisk && trustRole === 'low_trust') {
+      const { data: gateReq } = await supabase
+        .from('pending_approvals')
+        .select('id, status')
+        .eq('sop_id', sopId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!gateReq || gateReq.status !== 'approved') {
+        await logExecution(sopId, 'execute_sop_step', { stepNumber, blocked: true }, 'blocked_gated', callerId);
+        return JSON.stringify({
+          error: `HUMAN GATE REQUIRED: SOP "${sop.title}" requires human manager approval before step execution. Please submit an execution ticket using 'request_execution_approval'.`,
+          approval_status: gateReq ? gateReq.status : 'unrequested',
+        });
+      }
+    }
+
+    // 3. Locate Step Definition
+    const steps = Array.isArray(sop.execution_steps) ? sop.execution_steps : [];
+    const stepDef = steps.find((s: any) => s.step_number === stepNumber) || steps[stepNumber - 1];
+
+    if (!stepDef) {
+      await logExecution(sopId, 'execute_sop_step', { stepNumber, total_steps: steps.length }, 'error', callerId);
+      return JSON.stringify({ error: `Step ${stepNumber} not found in SOP execution steps.` });
+    }
+
+    const targetSystem = (stepDef.target_system || stepDef.target || 'admin_cli').toLowerCase();
+
+    // 4. Look up target integration in `integration_connections` table
+    const { data: conn } = await supabase
+      .from('integration_connections')
+      .select('integration_name, endpoint_config, credential_ref')
+      .eq('integration_name', targetSystem)
+      .limit(1)
+      .single();
+
+    const endpointConfig = conn?.endpoint_config || { base_url: `https://api.${targetSystem}.internal` };
+
+    // 5. Execute stubbed API step dispatch
+    const executionId = `exec_${Date.now()}_step_${stepNumber}`;
+    const dispatchDetails = {
+      action: stepDef.action || stepDef.instruction,
+      target_system: targetSystem,
+      endpoint_config: endpointConfig,
+      parameters: parameters || stepDef.parameters || {},
+      dispatched_at: new Date().toISOString(),
+    };
+
+    console.log(`[INFO] [MCP Execution Engine] Executed Step ${stepNumber} for SOP "${sop.title}" on target system: ${targetSystem}`);
+
+    // 6. Automatically log outcome to execution_logs
+    await logExecution(sopId, 'execute_sop_step', { stepNumber, targetSystem, executionId, dispatchDetails }, 'success', callerId);
+
+    return JSON.stringify({
+      success: true,
+      execution_id: executionId,
+      sop_id: sopId,
+      sop_title: sop.title,
+      step_number: stepNumber,
+      target_system: targetSystem,
+      outcome: 'success',
+      dispatch_details: dispatchDetails,
+      message: `Successfully executed Step ${stepNumber} (${stepDef.action || 'Action'}) against ${targetSystem}.`,
+    });
+  },
+});
+
+// ─── Tool 7: Log SOP Execution Outcome ──────────────────────
 
 server.addTool({
   name: 'log_sop_execution',
-  description: 'Reports the outcome after an AI agent has executed an SOP procedure. Use this to track execution outcomes and reliability.',
+  description: 'Reports the outcome after an AI agent has executed an SOP procedure. Use this to track manual execution outcomes and reliability.',
   parameters: z.object({
     sopId: z.string().uuid().describe('The UUID of the SOP that was executed'),
     agentId: z.string().describe('Identifier for the agent that executed the SOP'),

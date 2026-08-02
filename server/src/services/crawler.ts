@@ -2,6 +2,8 @@ import dotenv from 'dotenv';
 import { crawlSlackHistory, isSOPCandidateSlackThread, processSlackThreadCandidates, type SlackThread } from './crawlers/slack.js';
 import { crawlGithubPostMortems } from './crawlers/github.js';
 import { crawlLinearIncidents } from './crawlers/linear.js';
+import { crawlEmailInbox } from './crawlers/email.js';
+import { crawlDatabaseLogs } from './crawlers/database.js';
 
 dotenv.config();
 
@@ -9,6 +11,8 @@ export {
   crawlSlackHistory,
   crawlGithubPostMortems,
   crawlLinearIncidents,
+  crawlEmailInbox,
+  crawlDatabaseLogs,
   isSOPCandidateSlackThread,
   processSlackThreadCandidates,
   type SlackThread,
@@ -18,27 +22,31 @@ export {
  * Background Crawler Worker Service
  * 
  * Periodically polls historical team communications across Slack channels,
- * GitHub post-mortem issues/PRs, and Linear incident tickets to pull tacit knowledge
- * into Company Brain SOP drafts. Deduplicates processed items using public.crawled_sources.
+ * GitHub post-mortem issues/PRs, Linear incident tickets, Email shared inboxes, and Database query logs
+ * to pull tacit knowledge into Company Brain SOP drafts.
  */
 
 let crawlerTimer: NodeJS.Timeout | null = null;
 const CRAWL_INTERVAL_MS = parseInt(process.env.CRAWL_INTERVAL_MS || '3600000', 10); // Default: every 1 hour (3600000ms)
 
 /**
- * Executes a single complete crawler cycle across all configured sources.
+ * Executes a single complete crawler cycle across all 5 active historical sources.
  */
 export async function runCrawlCycle(): Promise<void> {
-  console.log('[INFO] [Crawler Worker] Running background historical knowledge crawl cycle across Slack, GitHub & Linear...');
+  console.log('[INFO] [Crawler Worker] Running background historical knowledge crawl cycle across Slack, GitHub, Linear, Email & Database...');
   try {
     const slackRes = await crawlSlackHistory();
     const githubRes = await crawlGithubPostMortems();
     const linearRes = await crawlLinearIncidents();
+    const emailRes = await crawlEmailInbox();
+    const dbRes = await crawlDatabaseLogs();
 
     console.log('[INFO] [Crawler Worker] Background crawl cycle complete:', {
       slack: slackRes.status,
       github: githubRes.status,
       linear: linearRes.status,
+      email: emailRes.status,
+      database: dbRes.status,
     });
   } catch (err) {
     console.error('[ERROR] [Crawler Worker] Failures during crawl cycle:', err);

@@ -1,20 +1,20 @@
 # Company Brain 🧠
 
 > **The missing layer between raw company data and reliable AI automation.**  
-> An AI-native operational knowledge engine that ingests fragmented team communication (Slack, GitHub, Linear), extracts structured Standard Operating Procedures (SOPs), maintains procedural freshness, and serves executable skills to AI agents via FastMCP.
+> An AI-native operational knowledge engine that ingests fragmented team communication across 7 active sources (Slack, GitHub, Linear, Zendesk, Email, Database, Direct Teach), extracts structured Standard Operating Procedures (SOPs), maintains procedural freshness, and serves executable skills to AI agents via FastMCP.
 
 ---
 
 ## 🎯 What is Company Brain?
 
-As AI models improve, the primary blocker to enterprise AI automation is no longer model intelligence—it's **scattered domain knowledge**. Knowledge lives in Slack threads, GitHub issue comments, Linear tickets, and support logs.
+As AI models improve, the primary blocker to enterprise AI automation is no longer model intelligence—it's **scattered domain knowledge**. Knowledge lives in Slack threads, GitHub issue comments, Linear tickets, support emails, database runbooks, and tacit dictations.
 
 Company Brain acts as a living map of how a company operates. It:
-1. **Ingests** unstructured communication from multi-source webhooks (Slack, GitHub, Linear).
-2. **Extracts** structured SOPs with triggers, preconditions, execution steps, step conditions, and failure handling.
-3. **Maintains Freshness** with immutable version history, automated staleness detection, and LLM conflict resolution.
-4. **Governs** procedures via human-in-the-loop Draft → Approved status control.
-5. **Exposes Executable Skills** to autonomous AI agents over Model Context Protocol (FastMCP) on `:8080`.
+1. **Ingests** unstructured communication from multi-source webhooks and active historical crawlers (Slack, GitHub, Linear, Zendesk, Email, Database, Teach).
+2. **Extracts** structured SOPs with triggers, preconditions, execution steps, step conditions, and failure handling using Zod-validated schema governance.
+3. **Maintains Freshness** with immutable version history, automated staleness detection, and pgvector semantic conflict detection.
+4. **Governs** procedures via human-in-the-loop Draft → Approved status control and real-time execution gate tickets for High/Critical risk SOPs.
+5. **Exposes Executable Skills** to autonomous AI agents over Model Context Protocol (FastMCP) on `:8080` with direct target integration dispatching.
 
 ---
 
@@ -29,11 +29,11 @@ Company Brain acts as a living map of how a company operates. It:
  │ Slack        │                 │  │ Freshness Engine    │  │    Port 8080    │  Custom Autonomous      │
  │ GitHub       │                 │  └──────────┬──────────┘  │                 │  Agents                 │
  │ Linear       │                 │             │             │                 └─────────────────────────┘
- └──────────────┘                 │             ▼             │
-                                  │  ┌─────────────────────┐  │
-                                  │  │ Supabase Storage &  │  │
-                                  │  │ TanStack UI (:3001) │  │
-                                  │  └─────────────────────┘  │
+ │ Zendesk      │                 │             ▼             │
+ │ Email        │                 │  ┌─────────────────────┐  │
+ │ Database     │                 │  │ Supabase Storage &  │  │
+ │ Direct Teach │                 │  │ Glassmorphic UI    │  │
+ └──────────────┘                 │  └─────────────────────┘  │
                                   └───────────────────────────┘
 ```
 
@@ -59,12 +59,17 @@ PORT=5001
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 OPENROUTER_API_KEY=your_openrouter_key
+JWT_SECRET=your_jwt_signing_secret
 ```
 
 Run database migrations in Supabase SQL Editor:
 1. `server/supabase/create_skills_sops.sql`
 2. `server/supabase/create_raw_threads_and_citations.sql`
 3. `server/supabase/003_versioning_and_logs.sql`
+4. `server/supabase/004_enterprise_guardrails_and_rbac.sql`
+5. `server/supabase/005_ingestion_failures_and_embeddings.sql`
+6. `server/supabase/006_crawled_sources_table.sql`
+7. `server/supabase/007_tool_registry.sql`
 
 Start the Express API & FastMCP Server:
 ```bash
@@ -82,15 +87,15 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3001` to view the **TanStack Start Glassmorphism UI**.
+Open `http://localhost:3000` to view the **Glassmorphism Management UI**.
 
 ---
 
-## 🔌 Webhook Endpoints
+## 🔌 Ingestion Sources & Webhook Endpoints
 
-Send payloads to test real-time SOP extraction:
+Send payloads or trigger webhooks across 7 supported sources:
 
-### Slack
+### 1. Slack
 ```bash
 curl -X POST http://localhost:5001/api/ingestion/webhook \
   -H "Content-Type: application/json" \
@@ -106,7 +111,7 @@ curl -X POST http://localhost:5001/api/ingestion/webhook \
   }'
 ```
 
-### GitHub
+### 2. GitHub
 ```bash
 curl -X POST http://localhost:5001/api/ingestion/webhook/github \
   -H "Content-Type: application/json" \
@@ -120,7 +125,7 @@ curl -X POST http://localhost:5001/api/ingestion/webhook/github \
   }'
 ```
 
-### Linear
+### 3. Linear
 ```bash
 curl -X POST http://localhost:5001/api/ingestion/webhook/linear \
   -H "Content-Type: application/json" \
@@ -134,23 +139,87 @@ curl -X POST http://localhost:5001/api/ingestion/webhook/linear \
   }'
 ```
 
+### 4. Zendesk Support
+```bash
+curl -X POST http://localhost:5001/api/ingestion/webhook/zendesk \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mock-admin-token" \
+  -d '{
+    "external_thread_id": "zd-ticket-8821",
+    "channel_or_project": "tier3-support",
+    "messages": [
+      {"user": "Senior Tech", "text": "For enterprise SSO login timeouts: 1) Flush SAML session cache in Admin CLI 2) Verify metadata URL response in Postgres 3) Notify customer rep in Zendesk."}
+    ]
+  }'
+```
+
+### 5. Email Shared Inbox
+```bash
+curl -X POST http://localhost:5001/api/ingestion/webhook/email \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mock-admin-token" \
+  -d '{
+    "external_thread_id": "msg-em-991",
+    "channel_or_project": "ops-inbox",
+    "messages": [
+      {"user": "ops-lead@company.com", "text": "Subject: High Memory Outage Runbook. When API pod memory usage exceeds 92%: 1) Dump heap trace 2) Restart pod in Admin CLI 3) Log incident to #ops."}
+    ]
+  }'
+```
+
+### 6. Database Runbooks & Query Logs
+```bash
+curl -X POST http://localhost:5001/api/ingestion/webhook/database \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mock-admin-token" \
+  -d '{
+    "external_thread_id": "db-proc-override-1",
+    "channel_or_project": "postgres_primary",
+    "messages": [
+      {"user": "db_routine_scanner", "text": "EXPLICIT OPERATIONAL SOP DECREE: When Postgres idle_in_transaction count exceeds 15 for > 5m: 1) Query pg_stat_activity 2) Terminate deadlocked PIDs in Postgres 3) Post alert to #database-ops."}
+    ]
+  }'
+```
+
+### 7. Direct Tacit Knowledge Teach
+```bash
+curl -X POST http://localhost:5001/api/ingestion/webhook/teach \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mock-admin-token" \
+  -d '{
+    "title": "Legacy VIP Refund Exception Protocol",
+    "category": "Billing",
+    "description": "When an enterprise customer requests an override refund above $1,000 within 14 days of renewal: 1) Verify contract status in Stripe 2) Confirm zero chargeback disputes in Stripe 3) Issue 50% credit memo 4) Log to #billing-approvals on Slack.",
+    "steps": [
+      "Verify contract status in Stripe",
+      "Confirm zero chargeback disputes in Stripe",
+      "Issue 50% credit memo",
+      "Log to #billing-approvals on Slack"
+    ]
+  }'
+```
+
 ---
 
 ## 🤖 FastMCP Tools for AI Agents
 
 Connect any MCP-compatible client (Claude Desktop, Cursor, Custom Subagent) to `http://localhost:8080/mcp`.
 
-Available MCP tools:
-- `get_sop_by_id`: Fetch approved SOP execution steps & rules.
-- `search_operational_sops`: Search approved SOPs by category or keyword.
-- `get_sop_with_history`: Fetch SOP details alongside version evolution snapshots.
-- `log_sop_execution`: Log agent execution outcomes back to Company Brain observability.
+| FastMCP Tool | Description | Human Gate Enforcement |
+| :--- | :--- | :--- |
+| `get_sop_by_id` | Retrieves approved SOP steps & trigger rules. | Blocks low-trust agents if High/Critical risk SOP is unapproved by manager. |
+| `search_operational_sops` | Searches approved SOPs by category or keyword query. | None (read query). |
+| `get_sop_with_history` | Fetches SOP details alongside version evolution snapshots. | None (audit query). |
+| `request_execution_approval` | Submits a real-time human approval ticket to manager queue for High/Critical risk SOP execution. | Creates pending approval record in `pending_approvals`. |
+| `check_approval_status` | Checks if a human manager has approved a pending execution ticket. | Reads approval status (`pending`, `approved`, `rejected`). |
+| `execute_sop_step` | **Execution Engine**: Executes a step against target systems (Stripe, GitHub, Postgres, Slack, Admin CLI) via `integration_connections`. | Strictly rejects execution if High/Critical risk SOP lacks an approved manager ticket. Automatically logs outcome to `execution_logs`. |
+| `log_sop_execution` | Logs agent execution outcomes back to Company Brain observability. | None (logging). |
 
 ---
 
 ## 📜 Tech Stack
 
-- **Frontend**: React 19, TanStack Start/Router, Vite, TailwindCSS v4, Lucide Icons
+- **Frontend**: React 19, TanStack Start/Router, Vite, Vanilla CSS / Glassmorphism Design System, Lucide Icons
 - **Backend**: Node.js, Express, FastMCP, Supabase JS client
 - **AI Extraction**: OpenRouter (Google Gemma 4 / Ling-3.0 Flash)
-- **Database**: Supabase PostgreSQL (JSONB execution steps, vector/text indexing, audit tables)
+- **Database**: Supabase PostgreSQL (`pgvector` cosine similarity, JSONB execution steps, audit logs, `integration_connections` tool registry)
