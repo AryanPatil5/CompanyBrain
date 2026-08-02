@@ -56,7 +56,8 @@ export function normalizeGitHub(body: any): ThreadPayload | null {
   if (!issue) return null;
 
   const repo = body.repository?.full_name || 'unknown-repo';
-  const workspaceId = body.workspace_id || body.installation?.id?.toString() || 'default';
+  const workspaceId = body.workspace_id;
+  if (!workspaceId) return null;
   const threadId = `gh-${repo}-${issue.number}`;
 
   const messages: ThreadPayload['messages'] = [];

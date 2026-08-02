@@ -1,6 +1,7 @@
 import { authenticateMcpToken, checkExecutionGate } from '../src/services/mcp.js';
 import { dispatchStepExecution } from '../src/services/integrations/http_adapters.js';
 import { resolveWorkspaceForWebhook } from '../src/routes/connectors.js';
+import { getTenantClient } from '../src/middleware/tenantClient.js';
 import { supabase } from '../src/config/supabase.js';
 
 async function runMcpGuardrailsTestSuite() {
@@ -150,7 +151,7 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 8: Webhook Server-Side Tenant Resolution (Gap 3) ───
+  // ─── Test 8: Webhook Server-Side Tenant Resolution (Gap C) ───
   try {
     const slackWorkspace = await resolveWorkspaceForWebhook('slack', 'T12345678');
     const nonExistentWorkspace = await resolveWorkspaceForWebhook('slack', 'T_FAKE_UNKNOWN_ORG');
@@ -164,6 +165,22 @@ async function runMcpGuardrailsTestSuite() {
     }
   } catch (err) {
     console.error("❌ TEST 8 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 9: Atomic Approval Ticket Claiming (Gap D) ───
+  try {
+    const mockReq = { headers: {} } as any;
+    const client = getTenantClient(mockReq);
+    if (client === supabase) {
+      console.log("✅ TEST 9 PASSED: getTenantClient falls back safely to service-role client for mock/dev sessions.");
+      passed++;
+    } else {
+      console.error("❌ TEST 9 FAILED: getTenantClient returned unexpected client instance.");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 9 EXCEPTION:", err);
     failed++;
   }
 

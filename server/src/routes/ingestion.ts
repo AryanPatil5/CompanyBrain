@@ -15,16 +15,18 @@ import { detectConflict, createVersion } from '../services/freshness.js';
 import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature, resolveWorkspaceForWebhook } from './connectors.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { generateEmbedding } from '../services/embeddings.js';
+import { getTenantClient } from '../middleware/tenantClient.js';
 
 const router = Router();
 
-async function processThread(payload: ThreadPayload, res: Response): Promise<void> {
+async function processThread(payload: ThreadPayload, res: Response, req?: Request): Promise<void> {
   const { workspace_id, source, external_thread_id, channel_or_project, messages } = payload;
+  const client = req ? getTenantClient(req) : supabase;
 
   console.log(`[Ingestion] Received ${source} webhook for thread/source: ${external_thread_id}`);
 
   // Store raw thread
-  const { data: rawThread, error: rawErr } = await supabase
+  const { data: rawThread, error: rawErr } = await client
     .from('raw_threads')
     .upsert({
       workspace_id,
@@ -168,13 +170,19 @@ async function processThread(payload: ThreadPayload, res: Response): Promise<voi
 router.post('/webhook', verifySlackSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const externalOrgId = req.body.team_id || req.body.team?.id;
-    if (externalOrgId) {
-      const serverWorkspaceId = await resolveWorkspaceForWebhook('slack', externalOrgId);
-      if (serverWorkspaceId && req.body.workspace_id && req.body.workspace_id !== serverWorkspaceId) {
-        res.status(400).json({ error: 'Invalid webhook payload: workspace_id mismatch with verified integration installation.' });
-        return;
-      }
+    if (!externalOrgId) {
+      res.status(400).json({ error: 'Missing team_id in Slack webhook payload.' });
+      return;
     }
+
+    const serverWorkspaceId = await resolveWorkspaceForWebhook('slack', externalOrgId);
+    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
+      res.status(403).json({ error: 'This Slack workspace is not registered with Company Brain.' });
+      return;
+    }
+
+    // Override req.body.workspace_id with verified server-side workspace ID
+    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
 
     const payload = normalizeSlack(req.body);
     if (!payload) {
@@ -191,13 +199,18 @@ router.post('/webhook', verifySlackSignature, async (req: Request, res: Response
 router.post('/webhook/github', verifyGitHubSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const externalOrgId = req.body.installation?.id || req.body.repository?.owner?.id || req.body.org;
-    if (externalOrgId) {
-      const serverWorkspaceId = await resolveWorkspaceForWebhook('github', String(externalOrgId));
-      if (serverWorkspaceId && req.body.workspace_id && req.body.workspace_id !== serverWorkspaceId) {
-        res.status(400).json({ error: 'Invalid webhook payload: workspace_id mismatch with verified integration installation.' });
-        return;
-      }
+    if (!externalOrgId) {
+      res.status(400).json({ error: 'Missing installation_id or owner in GitHub webhook payload.' });
+      return;
     }
+
+    const serverWorkspaceId = await resolveWorkspaceForWebhook('github', String(externalOrgId));
+    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
+      res.status(403).json({ error: 'This GitHub organization is not registered with Company Brain.' });
+      return;
+    }
+
+    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
 
     const payload = normalizeGitHub(req.body);
     if (!payload) {
@@ -213,13 +226,18 @@ router.post('/webhook/github', verifyGitHubSignature, async (req: Request, res: 
 router.post('/webhook/linear', verifyLinearSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const externalOrgId = req.body.organizationId || req.body.org_id;
-    if (externalOrgId) {
-      const serverWorkspaceId = await resolveWorkspaceForWebhook('linear', String(externalOrgId));
-      if (serverWorkspaceId && req.body.workspace_id && req.body.workspace_id !== serverWorkspaceId) {
-        res.status(400).json({ error: 'Invalid webhook payload: workspace_id mismatch with verified integration installation.' });
-        return;
-      }
+    if (!externalOrgId) {
+      res.status(400).json({ error: 'Missing organizationId in Linear webhook payload.' });
+      return;
     }
+
+    const serverWorkspaceId = await resolveWorkspaceForWebhook('linear', String(externalOrgId));
+    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
+      res.status(403).json({ error: 'This Linear organization is not registered with Company Brain.' });
+      return;
+    }
+
+    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
 
     const payload = normalizeLinear(req.body);
     if (!payload) {

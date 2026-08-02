@@ -431,6 +431,25 @@ server.addTool({
       });
     }
 
+    // Gap D Fix: Claim approval ticket atomically BEFORE target system dispatch (prevents TOCTOU race window)
+    if (approvalId) {
+      const { data: claimedTicket, error: claimErr } = await supabase
+        .from('pending_approvals')
+        .update({ consumed_at: new Date().toISOString() })
+        .eq('id', approvalId)
+        .is('consumed_at', null)
+        .select()
+        .single();
+
+      if (claimErr || !claimedTicket) {
+        await logExecution(sopId, 'execute_sop_step', { stepNumber, blocked: true }, 'blocked_already_consumed', callerId);
+        return JSON.stringify({
+          error: `HUMAN GATE REQUIRED: Approval ticket #${approvalId} has already been claimed/consumed or is invalid. A fresh manager approval is required.`,
+          approval_status: 'already_consumed',
+        });
+      }
+    }
+
     // 4. Locate Step Definition
     const steps = Array.isArray(sop.execution_steps) ? sop.execution_steps : [];
     const stepDef = steps.find((s: any) => s.step_number === stepNumber) || steps[stepNumber - 1];
@@ -460,18 +479,6 @@ server.addTool({
       parameters || stepDef.parameters || {},
       credentialRef
     );
-
-    // Consume single-use approval ticket on successful execution
-    if (httpRes.success && approvalId) {
-      try {
-        await supabase
-          .from('pending_approvals')
-          .update({ consumed_at: new Date().toISOString() })
-          .eq('id', approvalId);
-      } catch (consumeErr) {
-        console.warn('[MCP] Failed to mark approval ticket consumed:', consumeErr);
-      }
-    }
 
     const executionId = `exec_${Date.now()}_step_${stepNumber}`;
     const dispatchDetails = {
