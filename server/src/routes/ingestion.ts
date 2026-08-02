@@ -187,9 +187,13 @@ router.post('/webhook/linear', verifyLinearSignature, async (req: Request, res: 
   }
 });
 
-router.post('/webhook/zendesk', async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/zendesk', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const payload = normalizeZendesk(req.body);
+    const user = (req as AuthenticatedRequest).user!;
+    const payload = normalizeZendesk({
+      ...req.body,
+      workspace_id: user.workspace_id
+    });
     if (!payload) {
       res.status(400).json({ error: 'Invalid Zendesk support payload.' });
       return;
@@ -200,9 +204,13 @@ router.post('/webhook/zendesk', async (req: Request, res: Response): Promise<voi
   }
 });
 
-router.post('/webhook/email', async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/email', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const payload = normalizeEmail(req.body);
+    const user = (req as AuthenticatedRequest).user!;
+    const payload = normalizeEmail({
+      ...req.body,
+      workspace_id: user.workspace_id
+    });
     if (!payload) {
       res.status(400).json({ error: 'Invalid email payload.' });
       return;
@@ -213,9 +221,13 @@ router.post('/webhook/email', async (req: Request, res: Response): Promise<void>
   }
 });
 
-router.post('/webhook/database', async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/database', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const payload = normalizeDatabase(req.body);
+    const user = (req as AuthenticatedRequest).user!;
+    const payload = normalizeDatabase({
+      ...req.body,
+      workspace_id: user.workspace_id
+    });
     if (!payload) {
       res.status(400).json({ error: 'Invalid database runbook payload.' });
       return;

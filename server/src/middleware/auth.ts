@@ -9,6 +9,11 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
+// 1. Hard-Fail on Missing JWT_SECRET at server startup in production
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error("FATAL: JWT_SECRET environment variable is missing in production mode.");
+}
+
 function base64UrlDecode(str: string): string {
   let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
   while (base64.length % 4) {
@@ -35,13 +40,31 @@ function verifyJWT(token: string, secret: string): any {
   }
 
   try {
-    return JSON.parse(base64UrlDecode(payloadB64));
+    const payload = JSON.parse(base64UrlDecode(payloadB64));
+    
+    // Check decoded expiration
+    if (payload && typeof payload.exp === 'number') {
+      const now = Math.floor(Date.now() / 1000);
+      if (payload.exp < now) {
+        return { error: 'expired' };
+      }
+    }
+    
+    return payload;
   } catch {
     return null;
   }
 }
 
 export function authenticate(req: Request, res: Response, next: NextFunction) {
+  const isProdMode = process.env.NODE_ENV === 'production';
+  const secretKey = process.env.JWT_SECRET;
+
+  // Hard-Fail inside middleware if secret is missing in production
+  if (isProdMode && !secretKey) {
+    throw new Error("FATAL: JWT_SECRET environment variable is missing in production mode.");
+  }
+
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Unauthorized: missing authorization bearer token' });
@@ -49,38 +72,44 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
 
   const token = authHeader.substring(7);
 
-  // 1. Check for mock tokens for dev testing
-  if (token === 'mock-admin-token') {
-    (req as AuthenticatedRequest).user = {
-      user_id: 'mock-user-admin',
-      role: 'admin',
-      workspace_id: '00000000-0000-0000-0000-000000000000',
-    };
-    return next();
-  }
-  if (token === 'mock-approver-token') {
-    (req as AuthenticatedRequest).user = {
-      user_id: 'mock-user-approver',
-      role: 'approver',
-      workspace_id: '00000000-0000-0000-0000-000000000000',
-    };
-    return next();
-  }
-  if (token === 'mock-member-token') {
-    (req as AuthenticatedRequest).user = {
-      user_id: 'mock-user-member',
-      role: 'member',
-      workspace_id: '00000000-0000-0000-0000-000000000000',
-    };
+  // 2. Gate/Remove Mock Token Backdoor: only allowed in development/non-production
+  if (token === 'mock-admin-token' || token === 'mock-approver-token' || token === 'mock-member-token') {
+    if (isProdMode) {
+      return res.status(401).json({ error: 'Unauthorized: mock tokens are forbidden in production' });
+    }
+    
+    if (token === 'mock-admin-token') {
+      (req as AuthenticatedRequest).user = {
+        user_id: 'mock-user-admin',
+        role: 'admin',
+        workspace_id: '00000000-0000-0000-0000-000000000000',
+      };
+    } else if (token === 'mock-approver-token') {
+      (req as AuthenticatedRequest).user = {
+        user_id: 'mock-user-approver',
+        role: 'approver',
+        workspace_id: '00000000-0000-0000-0000-000000000000',
+      };
+    } else if (token === 'mock-member-token') {
+      (req as AuthenticatedRequest).user = {
+        user_id: 'mock-user-member',
+        role: 'member',
+        workspace_id: '00000000-0000-0000-0000-000000000000',
+      };
+    }
     return next();
   }
 
-  // 2. Decode standard JWT
-  const jwtSecret = process.env.JWT_SECRET || 'fallback-secret-for-signing-token';
-  const decoded = verifyJWT(token, jwtSecret);
+  // 3. Decode standard JWT
+  const activeSecret = secretKey || 'fallback-secret-for-signing-token';
+  const decoded = verifyJWT(token, activeSecret);
 
   if (!decoded) {
     return res.status(401).json({ error: 'Unauthorized: invalid token signature' });
+  }
+
+  if (decoded.error === 'expired') {
+    return res.status(401).json({ error: 'Unauthorized: token has expired' });
   }
 
   const role = decoded.role;

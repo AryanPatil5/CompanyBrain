@@ -383,7 +383,7 @@ router.delete('/:id', requireRole(['admin', 'approver']), async (req: Request, r
 
 // ─── POST staleness sweep ────────────────────────────────────
 
-router.post('/check-staleness', async (req: Request, res: Response): Promise<void> => {
+router.post('/check-staleness', requireRole(['admin', 'approver']), async (req: Request, res: Response): Promise<void> => {
   try {
     const thresholdDays = parseInt(req.query.days as string) || 30;
     const count = await markStaleSOPs(thresholdDays);
