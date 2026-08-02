@@ -1,7 +1,10 @@
 import dotenv from 'dotenv';
 import { supabase } from '../config/supabase.js';
+import { isSOPCandidateSlackThread, processSlackThreadCandidates, type SlackThread } from './crawlers/slack.js';
 
 dotenv.config();
+
+export { isSOPCandidateSlackThread, processSlackThreadCandidates, type SlackThread };
 
 /**
  * Background Crawler Worker Service (Skeleton Architecture)
@@ -24,6 +27,9 @@ export interface CrawlResult {
 /**
  * Historical Slack Channel Poller Stub
  * 
+ * Uses text pattern heuristics ('resolution:', 'mitigation:', '[P0]', '[P1]')
+ * and reply count filters (> 2 replies) rather than fragile emoji reactions.
+ * 
  * TODO: Requires Slack App with Bot Token permissions:
  * - `channels:history` (read public channel message history)
  * - `groups:history` (read private channel message history)
@@ -35,7 +41,8 @@ export async function crawlSlackHistory(channelId: string = 'C0123456789'): Prom
   // TODO: Replace stub with Slack Web API client:
   // const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
   // const result = await slackClient.conversations.history({ channel: channelId, limit: 50 });
-  // Store raw conversations into `raw_threads` table with source: 'slack'
+  // Filter using processSlackThreadCandidates(threads) relying on text heuristics and reply_count > 2
+  // Store raw candidate conversations into `raw_threads` table with source: 'slack'
 
   return {
     source: 'slack',

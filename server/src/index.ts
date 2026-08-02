@@ -46,7 +46,7 @@ app.get('/health', (req, res) => {
 
 // Start Express API Server
 app.listen(PORT, () => {
-  console.log(`🚀 Company Brain REST API running at http://localhost:${PORT}`);
+  console.log(`[INFO] Company Brain REST API running at http://localhost:${PORT}`);
 });
 
 // Start FastMCP Server for AI Agents

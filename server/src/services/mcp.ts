@@ -229,5 +229,5 @@ export function startMCPServer() {
     transportType: 'httpStream',
     httpStream: { port: 8080, endpoint: '/mcp' },
   });
-  console.log('🤖 Company Brain FastMCP Server v2.5 (Guardrails Enabled) running on http://localhost:8080');
+  console.log('[INFO] Company Brain FastMCP Server v2.5 (Guardrails Enabled) running on http://localhost:8080');
 }
