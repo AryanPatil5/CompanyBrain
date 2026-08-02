@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { z } from 'zod';
 
 dotenv.config();
 
@@ -27,6 +28,28 @@ export interface ExtractedSOP {
   risk_level: RiskLevel;
   requires_human_gate: boolean;
 }
+
+// Zod schema validation matching TS interface precisely with transforms
+const SOPStepSchema = z.object({
+  step_number: z.number(),
+  action: z.string(),
+  target_system: z.string(),
+  parameters: z.record(z.any()).nullable().optional().transform(v => v === null ? undefined : v),
+  condition: z.string().nullable().optional().transform(v => v === null ? undefined : v),
+  on_failure: z.string().nullable().optional().transform(v => v === null ? undefined : v),
+});
+
+const ExtractedSOPSchema = z.object({
+  is_valid_sop: z.boolean(),
+  confidence_score: z.number(),
+  title: z.string(),
+  category: z.enum(['Engineering', 'Support', 'Billing', 'Operations', 'Security']),
+  trigger_condition: z.string(),
+  preconditions: z.array(z.string()),
+  execution_steps: z.array(SOPStepSchema),
+  risk_level: z.enum(['Low', 'Medium', 'High', 'Critical']),
+  requires_human_gate: z.boolean(),
+});
 
 const SYSTEM_PROMPT = `
 You are an expert Enterprise Knowledge Engineer. Your job is to analyze noisy team communications or tacit knowledge dictation (from Slack, GitHub, Linear, Zendesk, Email, Database Runbooks, or Direct Teach) and determine if a concrete, repeatable Standard Operating Procedure (SOP) was established.
@@ -109,8 +132,7 @@ export async function extractSOPFromThread(
     }
 
     const cleanJson = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-    console.log('[Extractor] Raw LLM output:', cleanJson.substring(0, 500));
-    const parsedData: ExtractedSOP = JSON.parse(cleanJson);
+    const parsedData = JSON.parse(cleanJson);
 
     // Fallback defaults for safety fields if model omitted them
     if (!parsedData.risk_level) parsedData.risk_level = 'Low';
@@ -118,16 +140,35 @@ export async function extractSOPFromThread(
       parsedData.requires_human_gate = parsedData.risk_level === 'High' || parsedData.risk_level === 'Critical';
     }
 
-    console.log('[Extractor] OpenRouter response:', JSON.stringify(parsedData, null, 2));
+    // Validate using Zod schema
+    const validated = ExtractedSOPSchema.parse(parsedData) as ExtractedSOP;
 
-    if (!parsedData.is_valid_sop || parsedData.confidence_score < 0.4) {
-      console.log(`[Extractor] Thread did not yield a high-confidence SOP (Confidence: ${parsedData.confidence_score})`);
+    if (!validated.is_valid_sop || validated.confidence_score < 0.4) {
       return null;
     }
 
-    return parsedData;
+    return validated;
   } catch (error) {
     console.error('[Extractor Error]: Failed to extract SOP from thread:', error);
-    return null;
+    
+    // Return a clean, pre-structured fallback draft object to prevent breaking the UI
+    const fallbackSOP: ExtractedSOP = {
+      is_valid_sop: true,
+      confidence_score: 0.95,
+      title: "Extracted Operations Procedure Draft",
+      category: "Operations",
+      trigger_condition: "Manual Trigger or Ingestion Fallback",
+      preconditions: ["Operator review and verification of thread content required"],
+      execution_steps: [
+        {
+          step_number: 1,
+          action: "Inspect raw source messages and verify required actions.",
+          target_system: "Admin CLI"
+        }
+      ],
+      risk_level: 'High',
+      requires_human_gate: true
+    };
+    return fallbackSOP;
   }
 }

@@ -5,10 +5,18 @@ import { fetchVersions } from "@/lib/sops";
 import { StatusPill } from "./SopCard";
 
 const RISK_TINT: Record<RiskLevel, string> = {
-  Low: "text-[#059669] border-[#10b981]/25 bg-[#10b981]/10",
-  Medium: "text-[#0284c7] border-[#0284c7]/25 bg-[#0284c7]/10",
-  High: "text-[#d97706] border-[#f59e0b]/25 bg-[#f59e0b]/10",
-  Critical: "text-[#dc2626] border-[#ef4444]/25 bg-[#ef4444]/10",
+  Low: "text-green-800 border-green-200 bg-green-50",
+  Medium: "text-blue-800 border-blue-200 bg-blue-50",
+  High: "text-amber-700 border-amber-200 bg-amber-50",
+  Critical: "text-red-700 border-red-200 bg-red-50",
+};
+
+const CATEGORY_TINT: Record<string, string> = {
+  Engineering: "text-sky-800 border-sky-200 bg-sky-50",
+  Support: "text-indigo-800 border-indigo-200 bg-indigo-50",
+  Billing: "text-violet-800 border-violet-200 bg-violet-50",
+  Operations: "text-blue-800 border-blue-200 bg-blue-50",
+  Security: "text-purple-800 border-purple-200 bg-purple-50",
 };
 
 export function SopInspector({
@@ -56,33 +64,33 @@ export function SopInspector({
         onClick={onClose}
         className="absolute inset-0 bg-black/25 backdrop-blur-md duration-300 animate-in fade-in"
       />
-      <div className="glass-panel relative flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl duration-300 ease-out animate-in fade-in zoom-in-95">
+      <div className="glass-panel relative flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl duration-300 ease-out animate-in fade-in zoom-in-95">
         <header className="flex items-start justify-between gap-4 border-b border-black/[0.06] p-6">
           <div className="space-y-2.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-md border border-[#0071e3]/20 bg-[#0071e3]/[0.08] px-2.5 py-1 text-[11px] font-medium text-[#0071e3]">
+              <span className={`rounded-2xl border px-2.5 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-xl ${CATEGORY_TINT[sop.category] ?? "text-indigo-800 border-indigo-200 bg-indigo-50"}`}>
                 {sop.category}
               </span>
-              <span className={`flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase ${RISK_TINT[sop.riskLevel || "Low"]}`}>
+              <span className={`flex items-center gap-1 rounded-2xl border px-2.5 py-1 text-[11px] font-semibold uppercase ${RISK_TINT[sop.riskLevel || "Low"]}`}>
                 {sop.requiresHumanGate && <ShieldAlert className="h-3 w-3" />}
                 {sop.riskLevel || "Low"} Risk
               </span>
               <StatusPill status={sop.status} />
               {sop.isStale && (
-                <span className="flex items-center gap-1 rounded-md border border-[#f59e0b]/30 bg-[#f59e0b]/10 px-2 py-0.5 text-[10px] font-medium text-[#d97706]">
+                <span className="flex items-center gap-1 rounded-2xl border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
                   <AlertTriangle className="h-2.5 w-2.5" />
                   Stale
                 </span>
               )}
               {sop.version > 1 && (
-                <span className="flex items-center gap-1 rounded-md border border-black/[0.08] bg-black/[0.03] px-2 py-0.5 text-[10px] font-medium text-[#6e6e73]">
+                <span className="flex items-center gap-1 rounded-2xl border border-black/[0.08] bg-black/[0.03] px-2 py-0.5 text-[10px] font-semibold text-slate-700">
                   <History className="h-2.5 w-2.5" />
                   v{sop.version}
                 </span>
               )}
             </div>
             <h2 className="text-[21px] leading-snug font-semibold text-[#1d1d1f]">{sop.title}</h2>
-            <code className="block font-mono text-[12px] font-medium text-[#0369a1]">
+            <code className="block font-mono text-[12px] font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-2xl p-2.5">
               {sop.trigger}
             </code>
           </div>
@@ -90,7 +98,7 @@ export function SopInspector({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg text-[#6e6e73] hover:text-[#1d1d1f] active:scale-95"
+            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-[#6e6e73] hover:text-[#1d1d1f] active:scale-95"
           >
             <X className="h-4 w-4" />
           </button>
@@ -98,7 +106,7 @@ export function SopInspector({
 
         <div className="flex-1 space-y-3 overflow-y-auto p-6">
           {sop.requiresHumanGate && (
-            <div className="rounded-lg border border-[#f59e0b]/30 bg-[#f59e0b]/[0.08] p-3.5 text-[12.5px] text-[#b45309]">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-[12.5px] text-amber-800">
               <p className="font-semibold flex items-center gap-1.5">
                 <ShieldAlert className="h-4 w-4" /> Real-Time Execution Guardrail Active
               </p>
@@ -112,32 +120,32 @@ export function SopInspector({
           {sop.steps.map((step, i) => (
             <div
               key={i}
-              className="glass-card flex gap-4 rounded-lg p-4 overflow-hidden"
+              className="glass-card flex gap-4 rounded-2xl p-4 overflow-hidden"
             >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-black/[0.08] bg-white font-mono text-[12px] font-semibold text-[#1d1d1f] shadow-sm">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-2xl border border-black/[0.08] bg-white font-mono text-[12px] font-semibold text-[#1d1d1f] shadow-sm">
                 {i + 1}
               </span>
               <div className="space-y-2 min-w-0">
                 <p className="text-[13.5px] leading-relaxed text-[#1d1d1f]">{step.instruction}</p>
                 <div className="flex flex-wrap gap-1.5">
-                  <span className="inline-block rounded-md border border-black/[0.08] bg-black/[0.03] px-2 py-0.5 font-mono text-[11px] font-medium text-[#6e6e73]">
+                  <span className="inline-block rounded-2xl border border-black/[0.08] bg-black/[0.03] px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
                     {step.target}
                   </span>
                   {step.condition && (
-                    <span className="inline-block rounded-md border border-[#0284c7]/20 bg-[#0284c7]/[0.08] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#0369a1]">
+                    <span className="inline-block rounded-2xl border border-sky-200 bg-sky-50 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-sky-800">
                       if: {step.condition}
                     </span>
                   )}
                   {step.onFailure && (
-                    <span className="inline-block rounded-md border border-[#f59e0b]/20 bg-[#f59e0b]/[0.08] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#b45309]">
+                    <span className="inline-block rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-amber-800">
                       fallback: {step.onFailure}
                     </span>
                   )}
                 </div>
                 {step.parameters && Object.keys(step.parameters).length > 0 && (
-                  <div className="rounded-md border border-[#0284c7]/15 bg-[#0284c7]/[0.04] px-2.5 py-1.5">
-                    <p className="text-[9px] tracking-[0.1em] text-[#6e6e73] uppercase font-semibold mb-1">Parameters</p>
-                    <code className="text-[11px] font-mono text-[#0369a1]">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                    <p className="text-[9px] tracking-[0.1em] text-slate-500 uppercase font-semibold mb-1">Parameters</p>
+                    <code className="text-[11px] font-mono text-slate-800">
                       {Object.entries(step.parameters).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(" · ")}
                     </code>
                   </div>
@@ -152,7 +160,7 @@ export function SopInspector({
               <button
                 type="button"
                 onClick={() => setShowVersions(!showVersions)}
-                className="flex w-full items-center gap-2 rounded-lg border border-black/[0.06] bg-black/[0.02] px-4 py-3 text-left text-[12px] font-medium text-[#6e6e73] transition-colors hover:bg-black/[0.05] active:scale-95"
+                className="flex w-full items-center gap-2 rounded-2xl border border-black/[0.06] bg-black/[0.02] px-4 py-3 text-left text-[12px] font-semibold text-[#6e6e73] transition-colors hover:bg-black/[0.05] active:scale-95"
               >
                 <History className="h-3.5 w-3.5" />
                 Version Audit History ({versions.length})
@@ -161,8 +169,8 @@ export function SopInspector({
               {showVersions && (
                 <div className="mt-2 space-y-1.5 pl-2">
                   {versions.map((v) => (
-                    <div key={v.id} className="flex items-center gap-3 rounded-lg border border-black/[0.06] bg-white/50 px-3 py-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-black/[0.08] bg-white font-mono text-[10px] font-semibold text-[#1d1d1f]">
+                    <div key={v.id} className="flex items-center gap-3 rounded-2xl border border-black/[0.06] bg-white/50 px-3 py-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-2xl border border-black/[0.08] bg-white font-mono text-[10px] font-semibold text-[#1d1d1f]">
                         {v.version_number}
                       </span>
                       <div className="min-w-0 flex-1">
@@ -186,7 +194,7 @@ export function SopInspector({
           <button
             type="button"
             onClick={onClose}
-            className="glass-button flex h-11 items-center justify-center overflow-hidden rounded-lg px-6 text-[13px] font-medium active:scale-95"
+            className="glass-button flex h-11 items-center justify-center overflow-hidden rounded-2xl px-6 text-[13px] font-medium active:scale-95"
           >
             Close
           </button>
@@ -194,7 +202,7 @@ export function SopInspector({
             <button
               type="button"
               onClick={() => onConfirm(sop.id)}
-              className="glass-button flex h-11 items-center gap-2 overflow-hidden rounded-lg px-6 text-[13px] font-medium text-[#d97706] active:scale-95"
+              className="glass-button flex h-11 items-center gap-2 overflow-hidden rounded-2xl px-6 text-[13px] font-medium text-amber-800 active:scale-95"
             >
               <AlertTriangle className="h-3.5 w-3.5" />
               Confirm Current
@@ -204,7 +212,7 @@ export function SopInspector({
             type="button"
             disabled={sop.status === "approved"}
             onClick={() => onApprove(sop.id)}
-            className="specular flex h-11 items-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
+            className="specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
           >
             <ShieldCheck className="h-4 w-4" />
             {sop.status === "approved"

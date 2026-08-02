@@ -100,9 +100,7 @@ function Index() {
     }
   };
 
-  const activeSop = sops.find((s) => s.id === activeId) ?? null;
-
-  return (
+  const activeSop = sops.find((s) => s.id === activeId) ?? null;  return (
     <div className="relative min-h-screen">
       <div className="ambient-field" aria-hidden />
 
@@ -110,7 +108,7 @@ function Index() {
         <GlassSidebar onTeachClick={() => setIsTeachModalOpen(true)} />
 
         <main className="flex min-w-0 flex-1 flex-col gap-5">
-          <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-xl px-6 py-5">
+          <header className="glass-panel flex flex-wrap items-center justify-between gap-4 rounded-2xl px-6 py-5 overflow-hidden">
             <div className="space-y-1">
               <h1 className="text-[26px] leading-tight font-semibold text-[#1d1d1f]">
                 Procedural Skills Library
@@ -130,7 +128,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => setIsTeachModalOpen(true)}
-                className="specular flex h-11 items-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
+                className="specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 Teach the Brain
@@ -139,7 +137,7 @@ function Index() {
               <button
                 type="button"
                 onClick={() => void load()}
-                className="glass-button specular flex h-11 items-center gap-2 overflow-hidden rounded-lg px-5 text-[13px] font-medium text-[#1d1d1f] active:scale-95"
+                className="glass-button specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl px-5 text-[13px] font-medium text-[#1d1d1f] active:scale-95"
               >
                 <RefreshCw
                   className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
@@ -151,36 +149,36 @@ function Index() {
 
           {/* Real-time Agent Approval Queue */}
           {pendingApprovals.length > 0 && live && (
-            <section className="glass-card rounded-lg border-[#f59e0b]/30 bg-[#f59e0b]/[0.06] p-5 space-y-3 overflow-hidden">
+            <section className="glass-card rounded-2xl border-amber-200 bg-amber-50/50 p-5 space-y-3 overflow-hidden">
               <div className="flex items-center justify-between">
-                <h3 className="text-[15px] font-semibold text-[#b45309] flex items-center gap-2">
+                <h3 className="text-[15px] font-semibold text-amber-800 flex items-center gap-2">
                   <ShieldAlert className="h-4 w-4" /> Agent Real-Time Execution Approval Queue ({pendingApprovals.length})
                 </h3>
-                <span className="text-[11px] font-medium text-[#6e6e73]">Human Guardrail Triggered</span>
+                <span className="text-[11px] font-semibold text-slate-500">Human Guardrail Triggered</span>
               </div>
               <div className="space-y-2">
                 {pendingApprovals.map((req) => (
-                  <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-black/[0.08] bg-white/80 p-3.5 shadow-sm overflow-hidden">
+                  <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/80 p-3.5 shadow-sm overflow-hidden">
                     <div className="space-y-0.5">
                       <p className="text-[13.5px] font-medium text-[#1d1d1f]">
-                        Agent <code className="text-[#0369a1] font-mono font-semibold">{req.agent_id}</code> requested to execute: <span className="font-semibold text-[#1d1d1f]">{req.skills_sops?.title || "High-Risk SOP"}</span>
+                        Agent <code className="text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded-2xl font-mono font-semibold">{req.agent_id}</code> requested to execute: <span className="font-semibold text-[#1d1d1f]">{req.skills_sops?.title || "High-Risk SOP"}</span>
                       </p>
-                      <p className="text-[11.5px] text-[#6e6e73]">
-                        Risk Level: <span className="text-[#b45309] font-semibold">{req.risk_level}</span> · Reason: {req.reason}
+                      <p className="text-[11.5px] text-slate-700">
+                        Risk Level: <span className="text-amber-700 font-semibold">{req.risk_level}</span> · Reason: {req.reason}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "approved")}
-                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-[#10b981]/30 bg-[#10b981]/10 px-4 text-[12px] font-semibold text-[#059669] hover:bg-[#10b981]/20 active:scale-95"
+                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-2xl border-green-200 bg-green-50 px-4 text-[12px] font-semibold text-green-800 hover:bg-green-100 active:scale-95"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve Execution
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleResolveApproval(req.id, "rejected")}
-                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-[#ef4444]/30 bg-[#ef4444]/10 px-4 text-[12px] font-semibold text-[#dc2626] hover:bg-[#ef4444]/20 active:scale-95"
+                        className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-2xl border-red-200 bg-red-50 px-4 text-[12px] font-semibold text-red-700 hover:bg-red-100 active:scale-95"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
                       </button>
@@ -194,40 +192,40 @@ function Index() {
           {/* Analytics Stats Bar */}
           {analytics && live && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="glass-card flex items-center gap-3 rounded-lg px-4 py-3.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0071e3]/10 text-[#0071e3]">
+              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3.5 overflow-hidden">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#0071e3]/10 text-[#0071e3]">
                   <Database className="h-4.5 w-4.5" />
                 </div>
                 <div>
                   <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.total_sops}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Total SOPs</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Total SOPs</p>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 rounded-lg px-4 py-3.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#10b981]/10 text-[#059669]">
+              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3.5 overflow-hidden">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#10b981]/10 text-[#059669]">
                   <ShieldCheck className="h-4.5 w-4.5" />
                 </div>
                 <div>
                   <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.by_status?.Approved || 0}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Approved</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Approved</p>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 rounded-lg px-4 py-3.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#f59e0b]/10 text-[#d97706]">
+              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3.5 overflow-hidden">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-amber-100/70 text-amber-700">
                   <ShieldAlert className="h-4.5 w-4.5" />
                 </div>
                 <div>
                   <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.pending_approvals_count || 0}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Gated Queue</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Gated Queue</p>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 rounded-lg px-4 py-3.5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0284c7]/10 text-[#0369a1]">
+              <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3.5 overflow-hidden">
+                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[#0284c7]/10 text-[#0369a1]">
                   <Activity className="h-4.5 w-4.5" />
                 </div>
                 <div>
                   <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.recent_executions}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-[#6e6e73] uppercase">Executions (7d)</p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Executions (7d)</p>
                 </div>
               </div>
             </div>

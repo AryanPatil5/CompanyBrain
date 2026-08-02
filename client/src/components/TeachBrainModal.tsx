@@ -60,11 +60,11 @@ export function TeachBrainModal({
         onClick={onClose}
         className="absolute inset-0 bg-black/25 backdrop-blur-md duration-300 animate-in fade-in"
       />
-      <div className="glass-panel relative flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl duration-300 ease-out animate-in fade-in zoom-in-95 shadow-[0_16px_50px_rgba(0,0,0,0.1)]">
+      <div className="glass-panel relative flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl duration-300 ease-out animate-in fade-in zoom-in-95 shadow-[0_16px_50px_rgba(0,0,0,0.1)]">
         <header className="flex items-start justify-between gap-4 border-b border-black/[0.06] p-6">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md border border-[#0071e3]/20 bg-[#0071e3]/[0.08] text-[#0071e3]">
+              <span className="flex h-6 w-6 items-center justify-center rounded-2xl border border-[#0071e3]/20 bg-[#0071e3]/[0.08] text-[#0071e3]">
                 <Sparkles className="h-3.5 w-3.5" />
               </span>
               <span className="text-[11px] font-semibold tracking-wide text-[#0071e3] uppercase">
@@ -80,7 +80,7 @@ export function TeachBrainModal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg text-[#6e6e73] hover:text-[#1d1d1f] active:scale-95"
+            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-[#6e6e73] hover:text-[#1d1d1f] active:scale-95"
           >
             <X className="h-4 w-4" />
           </button>
@@ -99,7 +99,7 @@ export function TeachBrainModal({
                   placeholder="e.g. Legacy Customer Refund Exception Protocol"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full h-11 rounded-lg border border-black/10 bg-white/80 px-4 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
+                  className="w-full h-11 rounded-2xl border border-black/10 bg-white/80 px-4 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
                 />
               </div>
 
@@ -111,7 +111,7 @@ export function TeachBrainModal({
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full h-11 appearance-none rounded-lg border border-black/10 bg-white/80 px-4 pr-10 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20 cursor-pointer"
+                    className="w-full h-11 appearance-none rounded-2xl border border-black/10 bg-white/80 px-4 pr-10 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20 cursor-pointer"
                   >
                     <option value="Engineering">Engineering</option>
                     <option value="Support">Support</option>
@@ -133,7 +133,7 @@ export function TeachBrainModal({
                 placeholder="e.g. Sarah Jenkins (Head of Ops)"
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
-                className="w-full h-11 rounded-lg border border-black/10 bg-white/80 px-4 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
+                className="w-full h-11 rounded-2xl border border-black/10 bg-white/80 px-4 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
               />
             </div>
 
@@ -147,7 +147,7 @@ export function TeachBrainModal({
                 placeholder="Describe when this procedure applies and what rules govern it..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-lg border border-black/10 bg-white/80 p-3.5 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
+                className="w-full rounded-2xl border border-black/10 bg-white/80 p-3.5 text-[13.5px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white focus:ring-2 focus:ring-[#0071e3]/20"
               />
             </div>
 
@@ -166,7 +166,7 @@ export function TeachBrainModal({
               </div>
               {steps.map((step, idx) => (
                 <div key={idx} className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-black/10 bg-white font-mono text-[11px] font-semibold text-[#1d1d1f] shadow-sm">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-black/10 bg-white font-mono text-[11px] font-semibold text-[#1d1d1f] shadow-sm">
                     {idx + 1}
                   </span>
                   <input
@@ -174,13 +174,13 @@ export function TeachBrainModal({
                     placeholder={`Step ${idx + 1} action (e.g. Verify account tier in Postgres)`}
                     value={step}
                     onChange={(e) => handleStepChange(idx, e.target.value)}
-                    className="flex-1 h-11 rounded-lg border border-black/10 bg-white/80 px-4 text-[13px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white"
+                    className="flex-1 h-11 rounded-2xl border border-black/10 bg-white/80 px-4 text-[13px] text-[#1d1d1f] shadow-[inset_0_1px_3px_rgba(0,0,0,0.03)] outline-none transition-colors focus:border-[#0071e3] focus:bg-white"
                   />
                   {steps.length > 1 && (
                     <button
                       type="button"
                       onClick={() => handleRemoveStep(idx)}
-                      className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg text-[#6e6e73] hover:text-[#dc2626] active:scale-95"
+                      className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-[#6e6e73] hover:text-[#dc2626] active:scale-95"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -194,14 +194,14 @@ export function TeachBrainModal({
             <button
               type="button"
               onClick={onClose}
-              className="glass-button flex h-11 items-center justify-center overflow-hidden rounded-lg px-6 text-[13px] font-medium active:scale-95"
+              className="glass-button flex h-11 items-center justify-center overflow-hidden rounded-2xl px-6 text-[13px] font-medium active:scale-95"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading || !title || !description}
-              className="specular flex h-11 items-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:opacity-50"
+              className="specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:opacity-50"
             >
               <UserCheck className="h-4 w-4" />
               {loading ? "Extracting & Indexing..." : "Synthesize into SOP Draft"}
