@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, AlertTriangle, History, Clock, ChevronDown, ChevronUp, ShieldAlert } from "lucide-react";
+import { X, ShieldCheck, AlertTriangle, History, Clock, ChevronDown, ChevronUp, ShieldAlert, Sparkles, RefreshCw, HelpCircle, AlertCircle } from "lucide-react";
 import type { Sop, SopVersion, RiskLevel } from "@/lib/sops";
-import { fetchVersions } from "@/lib/sops";
+import { fetchVersions, elicitSopQuestionsApi } from "@/lib/sops";
 import { StatusPill } from "./SopCard";
 
 const RISK_TINT: Record<RiskLevel, string> = {
@@ -32,6 +32,9 @@ export function SopInspector({
 }) {
   const [versions, setVersions] = useState<SopVersion[]>([]);
   const [showVersions, setShowVersions] = useState(false);
+  const [interviewLoading, setInterviewLoading] = useState(false);
+  const [interviewQuestions, setInterviewQuestions] = useState<string[]>([]);
+  const [interviewError, setInterviewError] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -42,13 +45,40 @@ export function SopInspector({
   useEffect(() => {
     if (sop) {
       void fetchVersions(sop.id).then(setVersions);
+      setInterviewQuestions([]);
+      setInterviewError(null);
     } else {
       setVersions([]);
       setShowVersions(false);
+      setInterviewQuestions([]);
+      setInterviewError(null);
     }
   }, [sop?.id]);
 
   if (!sop) return null;
+
+  const handleRunInterview = async () => {
+    setInterviewLoading(true);
+    setInterviewError(null);
+
+    const res = await elicitSopQuestionsApi({
+      title: sop.title,
+      category: sop.category,
+      trigger: sop.trigger,
+      steps: sop.steps,
+    });
+
+    setInterviewLoading(false);
+
+    if (res.success && res.questions.length > 0) {
+      setInterviewQuestions(res.questions);
+    } else {
+      setInterviewError(
+        res.error ||
+          "Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually."
+      );
+    }
+  };
 
   const REASON_LABELS: Record<string, string> = {
     initial_extraction: "Created from source thread",
@@ -104,59 +134,101 @@ export function SopInspector({
           </button>
         </header>
 
-        <div className="flex-1 space-y-3 overflow-y-auto p-6">
-          {sop.requiresHumanGate && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-[12.5px] text-amber-800">
-              <p className="font-semibold flex items-center gap-1.5">
-                <ShieldAlert className="h-4 w-4" /> Real-Time Execution Guardrail Active
-              </p>
-              <p className="mt-1 text-[12px]">
-                Because this procedure carries <strong>{sop.riskLevel} Risk</strong>, autonomous agents in low-trust roles are automatically gated and must submit a real-time execution approval request before performing these actions.
-              </p>
-            </div>
-          )}
+        <div className="flex-1 space-y-6 overflow-y-auto p-6">
+          <div className="space-y-2">
+            <h3 className="text-[11px] font-semibold text-[#6e6e73] uppercase">Summary</h3>
+            <p className="text-[13.5px] leading-relaxed text-[#1d1d1f]">{sop.summary}</p>
+          </div>
 
-          {/* Execution Steps */}
-          {sop.steps.map((step, i) => (
-            <div
-              key={i}
-              className="glass-card flex gap-4 rounded-2xl p-4 overflow-hidden"
-            >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-2xl border border-black/[0.08] bg-white font-mono text-[12px] font-semibold text-[#1d1d1f] shadow-sm">
-                {i + 1}
-              </span>
-              <div className="space-y-2 min-w-0">
-                <p className="text-[13.5px] leading-relaxed text-[#1d1d1f]">{step.instruction}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  <span className="inline-block rounded-2xl border border-black/[0.08] bg-black/[0.03] px-2.5 py-0.5 font-mono text-[11px] font-semibold text-slate-700">
-                    {step.target}
-                  </span>
-                  {step.condition && (
-                    <span className="inline-block rounded-2xl border border-sky-200 bg-sky-50 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-sky-800">
-                      if: {step.condition}
-                    </span>
-                  )}
-                  {step.onFailure && (
-                    <span className="inline-block rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-0.5 font-mono text-[10px] font-semibold text-amber-800">
-                      fallback: {step.onFailure}
-                    </span>
-                  )}
-                </div>
-                {step.parameters && Object.keys(step.parameters).length > 0 && (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                    <p className="text-[9px] tracking-[0.1em] text-slate-500 uppercase font-semibold mb-1">Parameters</p>
-                    <code className="text-[11px] font-mono text-slate-800">
-                      {Object.entries(step.parameters).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(" · ")}
-                    </code>
-                  </div>
-                )}
+          {/* Interactive Elicitation Section */}
+          <div className="rounded-2xl border border-[#0071e3]/20 bg-[#0071e3]/[0.03] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-[#0071e3]" />
+                <span className="text-[13px] font-semibold text-[#1d1d1f]">AI Elicitation Interview</span>
               </div>
+              <button
+                type="button"
+                onClick={handleRunInterview}
+                disabled={interviewLoading}
+                className="flex items-center gap-1.5 rounded-lg border border-[#0071e3]/30 bg-white px-3 py-1.5 text-[12px] font-semibold text-[#0071e3] shadow-sm hover:bg-[#0071e3]/[0.05] active:scale-95 disabled:opacity-50"
+              >
+                {interviewLoading ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Analyzing Edge Cases...
+                  </>
+                ) : (
+                  <>
+                    <HelpCircle className="h-3.5 w-3.5" />
+                    Run Interview
+                  </>
+                )}
+              </button>
             </div>
-          ))}
 
-          {/* Version History (collapsible) */}
+            {/* Error Alert Toast Panel */}
+            {interviewError && (
+              <div className="flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-red-800 animate-in fade-in">
+                <div className="flex items-start gap-2 text-[12.5px]">
+                  <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                  <p className="font-medium">{interviewError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRunInterview}
+                  className="flex items-center gap-1 shrink-0 rounded-lg bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-700 active:scale-95"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Questions Panel */}
+            {interviewQuestions.length > 0 && (
+              <div className="space-y-2 pt-1 animate-in fade-in">
+                <p className="text-[11.5px] font-semibold text-[#6e6e73] uppercase">
+                  Clarifying Edge Cases ({interviewQuestions.length}):
+                </p>
+                <div className="space-y-2">
+                  {interviewQuestions.map((q, idx) => (
+                    <div key={idx} className="flex items-start gap-2.5 rounded-xl border border-black/10 bg-white/90 p-3 text-[12.5px] text-[#1d1d1f] shadow-sm">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0071e3] text-white text-[10px] font-bold">
+                        {idx + 1}
+                      </span>
+                      <p className="leading-snug font-medium">{q}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="text-[11px] font-semibold text-[#6e6e73] uppercase">Execution Steps ({sop.steps.length})</h3>
+            <div className="space-y-2.5">
+              {sop.steps.map((step, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-start gap-3 rounded-2xl border border-black/[0.08] bg-white/70 p-3.5 shadow-sm"
+                >
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-2xl border border-[#0071e3]/20 bg-[#0071e3]/[0.08] text-[11px] font-bold text-[#0071e3]">
+                    {idx + 1}
+                  </span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="text-[13px] font-medium text-[#1d1d1f]">{step.instruction}</p>
+                    <span className="inline-block rounded-2xl border border-black/[0.06] bg-black/[0.03] px-2 py-0.5 font-mono text-[10.5px] font-semibold text-[#6e6e73]">
+                      Target: {step.target}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {versions.length > 0 && (
-            <div className="mt-4">
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={() => setShowVersions(!showVersions)}

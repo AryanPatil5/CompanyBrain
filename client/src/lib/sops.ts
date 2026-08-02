@@ -279,7 +279,13 @@ export async function teachBrainApi(payload: {
   }
 }
 
-export async function elicitSopQuestionsApi(sopDraft: Partial<Sop>): Promise<string[]> {
+export interface ElicitationResponse {
+  success: boolean;
+  questions: string[];
+  error?: string;
+}
+
+export async function elicitSopQuestionsApi(sopDraft: Partial<Sop>): Promise<ElicitationResponse> {
   try {
     const res = await fetch("http://localhost:5001/api/ingestion/interview", {
       method: "POST",
@@ -290,15 +296,26 @@ export async function elicitSopQuestionsApi(sopDraft: Partial<Sop>): Promise<str
       body: JSON.stringify({ sop: sopDraft }),
     });
 
-    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
     const data = await res.json();
-    return Array.isArray(data.questions) ? data.questions : [];
+
+    if (!res.ok || !data.success) {
+      return {
+        success: false,
+        questions: [],
+        error: data.error || "Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually.",
+      };
+    }
+
+    return {
+      success: true,
+      questions: Array.isArray(data.questions) ? data.questions : [],
+    };
   } catch (err) {
     console.error("Elicit SOP questions error:", err);
-    return [
-      "What is the required rollback procedure if step 2 fails mid-execution?",
-      "Are there specific threshold limits required before triggering this action?",
-      "Which ops channel should be alerted upon step completion?"
-    ];
+    return {
+      success: false,
+      questions: [],
+      error: "Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually.",
+    };
   }
 }

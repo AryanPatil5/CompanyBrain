@@ -327,22 +327,23 @@ Return ONLY raw JSON matching this schema:
     const cleanJson = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
     const parsed = JSON.parse(cleanJson);
 
+    if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      res.status(502).json({
+        success: false,
+        error: 'Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually.',
+      });
+      return;
+    }
+
     res.json({
       success: true,
-      questions: Array.isArray(parsed.questions) ? parsed.questions : [
-        "What is the rollback procedure if execution fails mid-step?",
-        "What specific threshold triggers this SOP?"
-      ]
+      questions: parsed.questions,
     });
   } catch (err) {
     console.error('[Interview Elicitation Error]:', err);
-    res.json({
-      success: true,
-      questions: [
-        "What is the rollback procedure if a step fails during execution?",
-        "Are there specific rate-limit or risk thresholds required before activating this procedure?",
-        "Which team channel should be notified upon completion or failure?"
-      ]
+    res.status(502).json({
+      success: false,
+      error: 'Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually.',
     });
   }
 });

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import ingestionRouter from './routes/ingestion.js';
 import sopsRouter from './routes/sops.js';
 import { startMCPServer } from './services/mcp.js';
+import { startCrawlerWorker } from './services/crawler.js';
 
 dotenv.config();
 
@@ -50,3 +51,6 @@ app.listen(PORT, () => {
 
 // Start FastMCP Server for AI Agents
 startMCPServer();
+
+// Start Background Knowledge Crawler Worker
+startCrawlerWorker();
