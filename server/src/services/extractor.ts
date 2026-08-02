@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
+import { supabase } from '../config/supabase.js';
 
 dotenv.config();
 
@@ -71,13 +72,15 @@ If risk_level is "High" or "Critical", set "requires_human_gate" to true.
 `;
 
 export async function extractSOPFromThread(
-  rawMessages: Array<{ user: string; text: string; timestamp?: string }>
+  rawMessages: Array<{ user: string; text: string; timestamp?: string }>,
+  workspaceId?: string,
+  source?: string
 ): Promise<ExtractedSOP | null> {
-  try {
-    const formattedTranscript = rawMessages
-      .map((msg) => `[${msg.user}]: ${msg.text}`)
-      .join('\n');
+  const formattedTranscript = rawMessages
+    .map((msg) => `[${msg.user || 'Unknown'}]: ${msg.text || ''}`)
+    .join('\n');
 
+  try {
     const userPrompt = `Analyze this transcript/dictation and extract an SOP object if a clear procedure exists:\n\n${formattedTranscript}\n\nReturn JSON output matching this schema:
 {
   "is_valid_sop": boolean,
@@ -132,7 +135,12 @@ export async function extractSOPFromThread(
     }
 
     const cleanJson = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-    const parsedData = JSON.parse(cleanJson);
+    let parsedData: any;
+    try {
+      parsedData = JSON.parse(cleanJson);
+    } catch (jsonErr) {
+      throw new Error(`Invalid JSON output from LLM: ${(jsonErr as Error).message}`);
+    }
 
     // Fallback defaults for safety fields if model omitted them
     if (!parsedData.risk_level) parsedData.risk_level = 'Low';
@@ -149,26 +157,22 @@ export async function extractSOPFromThread(
 
     return validated;
   } catch (error) {
-    console.error('[Extractor Error]: Failed to extract SOP from thread:', error);
-    
-    // Return a clean, pre-structured fallback draft object to prevent breaking the UI
-    const fallbackSOP: ExtractedSOP = {
-      is_valid_sop: true,
-      confidence_score: 0.95,
-      title: "Extracted Operations Procedure Draft",
-      category: "Operations",
-      trigger_condition: "Manual Trigger or Ingestion Fallback",
-      preconditions: ["Operator review and verification of thread content required"],
-      execution_steps: [
-        {
-          step_number: 1,
-          action: "Inspect raw source messages and verify required actions.",
-          target_system: "Admin CLI"
-        }
-      ],
-      risk_level: 'High',
-      requires_human_gate: true
-    };
-    return fallbackSOP;
+    const errorMsg = (error as Error).message || 'SOP extraction failed schema validation';
+    console.error('[Extractor Error]: Failed to extract SOP from thread:', errorMsg);
+
+    // Audit log failure to ingestion_failures table
+    try {
+      await supabase.from('ingestion_failures').insert({
+        workspace_id: workspaceId || null,
+        source: source || 'unknown',
+        raw_content: formattedTranscript,
+        error_message: errorMsg,
+      });
+    } catch (dbErr) {
+      console.error('[Extractor Error]: Failed to write ingestion_failure log:', dbErr);
+    }
+
+    // Throw error so processThread can return HTTP 422 Unprocessable Entity
+    throw new Error('SOP extraction failed schema validation');
   }
 }

@@ -278,3 +278,27 @@ export async function teachBrainApi(payload: {
     return false;
   }
 }
+
+export async function elicitSopQuestionsApi(sopDraft: Partial<Sop>): Promise<string[]> {
+  try {
+    const res = await fetch("http://localhost:5001/api/ingestion/interview", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({ sop: sopDraft }),
+    });
+
+    if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+    const data = await res.json();
+    return Array.isArray(data.questions) ? data.questions : [];
+  } catch (err) {
+    console.error("Elicit SOP questions error:", err);
+    return [
+      "What is the required rollback procedure if step 2 fails mid-execution?",
+      "Are there specific threshold limits required before triggering this action?",
+      "Which ops channel should be alerted upon step completion?"
+    ];
+  }
+}

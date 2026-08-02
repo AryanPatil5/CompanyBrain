@@ -1,11 +1,12 @@
 /**
  * Knowledge Freshness Service
  *
- * Handles SOP versioning, staleness detection, and conflict detection
+ * Handles SOP versioning, staleness detection, and pgvector semantic conflict detection
  * to keep the Company Brain knowledge current and accurate.
  */
 
 import { supabase } from '../config/supabase.js';
+import { generateEmbedding } from './embeddings.js';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -130,7 +131,7 @@ export async function confirmSOP(sopId: string): Promise<boolean> {
   return true;
 }
 
-// ─── Conflict Detection ──────────────────────────────────────
+// ─── Vector-Based Conflict Detection ────────────────────────
 
 interface ConflictResult {
   has_conflict: boolean;
@@ -140,9 +141,18 @@ interface ConflictResult {
   conflict_summary: string;
 }
 
+interface CandidateSOP {
+  id: string;
+  title: string;
+  trigger_condition: string;
+  category?: string;
+  similarity?: number;
+}
+
 /**
  * Checks if a newly extracted SOP conflicts with or duplicates an existing one.
- * Uses LLM comparison to detect semantic similarity.
+ * Uses pgvector semantic embeddings search (match_sops_by_embedding RPC) to retrieve
+ * the top 5 candidates, then passes them to LLM for final verification.
  */
 export async function detectConflict(
   newTitle: string,
@@ -158,35 +168,67 @@ export async function detectConflict(
   };
 
   try {
-    // Fetch existing approved/draft SOPs in the same workspace
-    const { data: existing, error } = await supabase
-      .from('skills_sops')
-      .select('id, title, trigger_condition, category')
-      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
-      .limit(20);
+    let candidateSOPs: CandidateSOP[] = [];
 
-    if (error || !existing || existing.length === 0) {
-      return noConflict;
+    // 1. Generate semantic embedding vector for incoming SOP title + trigger
+    const queryText = `${newTitle}: ${newTrigger}`;
+    const queryEmbedding = await generateEmbedding(queryText);
+
+    if (queryEmbedding && queryEmbedding.length > 0) {
+      // 2. Perform vector search query via Supabase match_sops_by_embedding RPC (top 5 max)
+      const { data: rpcMatches, error: rpcErr } = await supabase.rpc('match_sops_by_embedding', {
+        query_embedding: queryEmbedding,
+        filter_workspace_id: workspaceId,
+        match_threshold: 0.1,
+        match_count: 5,
+      });
+
+      if (!rpcErr && rpcMatches && rpcMatches.length > 0) {
+        candidateSOPs = rpcMatches;
+        console.log(`[Freshness] Semantic vector search found ${candidateSOPs.length} candidate matches for "${newTitle}"`);
+      }
     }
 
-    // Build a concise list for LLM comparison
-    const existingList = existing.map((s, i) =>
-      `[${i}] Title: "${s.title}" | Trigger: "${s.trigger_condition || 'N/A'}"`
-    ).join('\n');
+    // Fallback: If vector search returned no results or embedding API was unavailable,
+    // fetch top 5 most recent SOPs in workspace as fallback candidates
+    if (candidateSOPs.length === 0) {
+      const { data: fallbackList, error: fallbackErr } = await supabase
+        .from('skills_sops')
+        .select('id, title, trigger_condition, category')
+        .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+        .order('created_at', { ascending: false })
+        .limit(5);
 
-    const prompt = `You are comparing SOPs. A new SOP was extracted:
+      if (fallbackErr || !fallbackList || fallbackList.length === 0) {
+        return noConflict;
+      }
+      candidateSOPs = fallbackList;
+    }
+
+    // Guarantee we only pass top 5 candidates max into LLM prompt
+    const topCandidates = candidateSOPs.slice(0, 5);
+
+    // Build a concise candidate list for LLM verification
+    const candidatesText = topCandidates
+      .map((s, i) => `[Candidate ${i}] ID: "${s.id}" | Title: "${s.title}" | Trigger: "${s.trigger_condition || 'N/A'}"`)
+      .join('\n');
+
+    const prompt = `You are an Enterprise Knowledge Engineer evaluating potential duplicate SOPs.
+
+A new SOP was extracted:
 Title: "${newTitle}"
 Trigger: "${newTrigger}"
 
-Existing SOPs in the system:
-${existingList}
+Candidate Existing SOPs (Top Vector Matches):
+${candidatesText}
 
-Does the new SOP describe the SAME procedure as any existing one? Respond with only this JSON:
+Does the new SOP describe the SAME operational procedure or override protocol as any candidate?
+Respond ONLY with this raw JSON object:
 {
   "has_conflict": boolean,
   "matching_index": number or null,
   "similarity_score": number between 0 and 1,
-  "conflict_summary": "brief explanation"
+  "conflict_summary": "brief description of overlap or conflict"
 }`;
 
     const response = await fetch(OPENROUTER_BASE_URL, {
@@ -215,13 +257,13 @@ Does the new SOP describe the SAME procedure as any existing one? Respond with o
     const cleanJson = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
     const parsed = JSON.parse(cleanJson);
 
-    if (parsed.has_conflict && parsed.matching_index !== null && parsed.matching_index < existing.length) {
-      const match = existing[parsed.matching_index];
+    if (parsed.has_conflict && parsed.matching_index !== null && parsed.matching_index >= 0 && parsed.matching_index < topCandidates.length) {
+      const match = topCandidates[parsed.matching_index];
       return {
         has_conflict: true,
         matching_sop_id: match.id,
         matching_sop_title: match.title,
-        similarity_score: parsed.similarity_score || 0.8,
+        similarity_score: parsed.similarity_score || match.similarity || 0.8,
         conflict_summary: parsed.conflict_summary || 'Potential duplicate detected.',
       };
     }
@@ -232,7 +274,7 @@ Does the new SOP describe the SAME procedure as any existing one? Respond with o
       conflict_summary: parsed.conflict_summary || 'No conflicts found.',
     };
   } catch (err) {
-    console.warn('[Freshness] Conflict detection error (non-fatal):', err);
+    console.warn('[Freshness] Conflict detection exception (non-fatal):', err);
     return noConflict;
   }
 }

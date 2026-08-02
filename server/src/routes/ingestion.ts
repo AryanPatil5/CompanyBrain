@@ -14,6 +14,7 @@ import {
 import { detectConflict, createVersion } from '../services/freshness.js';
 import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature } from './connectors.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
+import { generateEmbedding } from '../services/embeddings.js';
 
 const router = Router();
 
@@ -42,8 +43,17 @@ async function processThread(payload: ThreadPayload, res: Response): Promise<voi
     return;
   }
 
-  // Extract SOP via LLM
-  const extractedSOP = await extractSOPFromThread(messages);
+  // Extract SOP via LLM with error handling for schema validation failures
+  let extractedSOP;
+  try {
+    extractedSOP = await extractSOPFromThread(messages, workspace_id, source);
+  } catch (extractErr) {
+    res.status(422).json({
+      success: false,
+      error: 'SOP extraction failed schema validation',
+    });
+    return;
+  }
 
   if (!extractedSOP) {
     res.status(200).json({
@@ -53,7 +63,7 @@ async function processThread(payload: ThreadPayload, res: Response): Promise<voi
     return;
   }
 
-  // Conflict detection — check if this SOP duplicates an existing one
+  // Conflict detection — check if this SOP duplicates an existing one using pgvector
   const conflict = await detectConflict(
     extractedSOP.title,
     extractedSOP.trigger_condition,
@@ -83,7 +93,10 @@ async function processThread(payload: ThreadPayload, res: Response): Promise<voi
     return;
   }
 
-  // Save as Draft SOP with Risk Level & Human Gate Policy
+  // Generate vector embedding for the SOP
+  const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+
+  // Save as Draft SOP with Risk Level, Human Gate Policy, and vector embedding
   const insertPayload: Record<string, any> = {
     workspace_id,
     title: extractedSOP.title,
@@ -99,14 +112,19 @@ async function processThread(payload: ThreadPayload, res: Response): Promise<voi
     is_stale: false,
   };
 
+  if (sopEmbedding) {
+    insertPayload.embedding = sopEmbedding;
+  }
+
   let { data: sopData, error: sopErr } = await supabase
     .from('skills_sops')
     .insert(insertPayload)
     .select()
     .single();
 
-  if (sopErr && (sopErr.message.includes('risk_level') || sopErr.message.includes('column'))) {
-    console.warn('[Ingestion Warning] risk_level column missing, inserting without migration 004 columns.');
+  if (sopErr && (sopErr.message.includes('embedding') || sopErr.message.includes('risk_level') || sopErr.message.includes('column'))) {
+    console.warn('[Ingestion Warning] Column missing in schema, inserting without extended vector/risk columns.');
+    delete insertPayload.embedding;
     delete insertPayload.risk_level;
     delete insertPayload.requires_human_gate;
 
@@ -253,6 +271,79 @@ router.post('/webhook/teach', authenticate, async (req: Request, res: Response):
   } catch (error) {
     console.error('[Direct Teach Ingestion Error]:', error);
     res.status(500).json({ error: 'Internal server error during Tacit Knowledge ingestion.' });
+  }
+});
+
+// ─── Interactive Elicitation Endpoint ──────────────────────
+
+router.post('/interview', authenticate, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const sopDraft = req.body.sop || req.body;
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+    const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+    const prompt = `You are an Enterprise Knowledge Engineer conducting an interactive elicitation interview for an SOP draft.
+Analyze this incomplete SOP draft:
+Title: "${sopDraft.title || 'Untitled'}"
+Category: "${sopDraft.category || 'Operations'}"
+Trigger Condition: "${sopDraft.trigger_condition || 'Unspecified'}"
+Preconditions: ${JSON.stringify(sopDraft.preconditions || [])}
+Execution Steps: ${JSON.stringify(sopDraft.execution_steps || [])}
+Risk Level: "${sopDraft.risk_level || 'Low'}"
+
+Identify missing edge cases, unspecified rollback/failure procedures, unhandled error conditions, or missing risk parameters.
+Generate EXACTLY 2 to 3 concise, specific clarifying questions for the human operator to complete this SOP.
+Return ONLY raw JSON matching this schema:
+{
+  "questions": [
+    "question 1 text",
+    "question 2 text",
+    "question 3 text"
+  ]
+}`;
+
+    const response = await fetch(OPENROUTER_BASE_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'http://localhost:5001',
+        'X-Title': 'Company Brain',
+      },
+      body: JSON.stringify({
+        model: 'inclusionai/ling-3.0-flash:free',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 500,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`LLM interview elicitation failed (${response.status})`);
+    }
+
+    const data = await response.json();
+    const rawText = data.choices?.[0]?.message?.content?.trim() || '';
+    const cleanJson = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+    const parsed = JSON.parse(cleanJson);
+
+    res.json({
+      success: true,
+      questions: Array.isArray(parsed.questions) ? parsed.questions : [
+        "What is the rollback procedure if execution fails mid-step?",
+        "What specific threshold triggers this SOP?"
+      ]
+    });
+  } catch (err) {
+    console.error('[Interview Elicitation Error]:', err);
+    res.json({
+      success: true,
+      questions: [
+        "What is the rollback procedure if a step fails during execution?",
+        "Are there specific rate-limit or risk thresholds required before activating this procedure?",
+        "Which team channel should be notified upon completion or failure?"
+      ]
+    });
   }
 });
 
