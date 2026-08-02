@@ -27,7 +27,7 @@ export function GlassSidebar({ onTeachClick }: { onTeachClick?: () => void }) {
               key={item.label}
               type="button"
               className={[
-                "group flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-left text-[13.5px] transition-all duration-300 overflow-hidden",
+                "group flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-left text-[13.5px] transition-all duration-300 overflow-hidden",
                 active
                   ? "glass-button font-semibold text-[#0071e3] shadow-[0_2px_10px_rgba(0,113,227,0.08)]"
                   : "text-[#6e6e73] hover:bg-black/[0.04] hover:text-[#1d1d1f]",
@@ -47,7 +47,7 @@ export function GlassSidebar({ onTeachClick }: { onTeachClick?: () => void }) {
           <button
             type="button"
             onClick={onTeachClick}
-            className="specular flex h-11 w-full items-center justify-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
+            className="specular flex h-11 w-full items-center justify-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-5 text-[13px] font-medium text-white shadow-[0_4px_14px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
           >
             <Sparkles className="h-4 w-4" />
             Teach the Brain

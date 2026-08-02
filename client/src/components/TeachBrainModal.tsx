@@ -80,7 +80,7 @@ export function TeachBrainModal({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-[#6e6e73] hover:text-[#1d1d1f] active:scale-95"
+            className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg text-[#6e6e73] hover:text-[#1d1d1f] active:scale-95"
           >
             <X className="h-4 w-4" />
           </button>
@@ -180,7 +180,7 @@ export function TeachBrainModal({
                     <button
                       type="button"
                       onClick={() => handleRemoveStep(idx)}
-                      className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-[#6e6e73] hover:text-[#dc2626] active:scale-95"
+                      className="glass-button flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg text-[#6e6e73] hover:text-[#dc2626] active:scale-95"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -194,14 +194,14 @@ export function TeachBrainModal({
             <button
               type="button"
               onClick={onClose}
-              className="glass-button flex h-11 items-center justify-center overflow-hidden rounded-2xl px-6 text-[13px] font-medium active:scale-95"
+              className="glass-button flex h-11 items-center justify-center overflow-hidden rounded-lg px-6 text-[13px] font-medium active:scale-95"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading || !title || !description}
-              className="specular flex h-11 items-center gap-2 overflow-hidden rounded-2xl border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:opacity-50"
+              className="specular flex h-11 items-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:opacity-50"
             >
               <UserCheck className="h-4 w-4" />
               {loading ? "Extracting & Indexing..." : "Synthesize into SOP Draft"}
