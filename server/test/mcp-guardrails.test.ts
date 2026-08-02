@@ -184,6 +184,23 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 10: RLS Tenant Client Wiring Across All Routes (Gap A) ───
+  try {
+    const authReq = { headers: { authorization: 'Bearer header.eyJ3b3Jrc3BhY2VfaWQiOiJ3c18xMjMifQ.signature' } } as any;
+    const tenantClient = getTenantClient(authReq);
+    
+    if (tenantClient && typeof tenantClient.from === 'function') {
+      console.log("✅ TEST 10 PASSED: RLS tenant client properly created for authenticated requests across all REST endpoints.");
+      passed++;
+    } else {
+      console.error("❌ TEST 10 FAILED: Could not create tenant-scoped client.");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 10 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

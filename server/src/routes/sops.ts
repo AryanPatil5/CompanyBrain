@@ -74,14 +74,15 @@ router.patch('/approvals/:approvalId', requireRole(['admin', 'approver']), async
     const { status, reason } = req.body; // 'approved' or 'rejected'
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
 
     if (!['approved', 'rejected'].includes(status)) {
       res.status(400).json({ error: 'Status must be "approved" or "rejected"' });
       return;
     }
 
-    // Verify ownership of the underlying SOP before modifying approval record
-    const { data: checkApproval, error: checkErr } = await supabase
+    // Verify ownership of the underlying SOP before modifying approval record via RLS-enforced client
+    const { data: checkApproval, error: checkErr } = await client
       .from('pending_approvals')
       .select('*, skills_sops!inner(workspace_id)')
       .eq('id', approvalId)
@@ -99,7 +100,7 @@ router.patch('/approvals/:approvalId', requireRole(['admin', 'approver']), async
       return;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('pending_approvals')
       .update({
         status,
@@ -127,8 +128,9 @@ router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
 
-    const { data: sops, error: sopErr } = await supabase
+    const { data: sops, error: sopErr } = await client
       .from('skills_sops')
       .select('id, title, status, category, is_stale, risk_level')
       .eq('workspace_id', workspaceId);
@@ -154,7 +156,7 @@ router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
     }
 
     // Pending agent execution approvals count for this workspace
-    const { count: pendingApprovalsCount } = await supabase
+    const { count: pendingApprovalsCount } = await client
       .from('pending_approvals')
       .select('id, skills_sops!inner(workspace_id)', { count: 'exact', head: true })
       .eq('skills_sops.workspace_id', workspaceId)
@@ -164,13 +166,13 @@ router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
     weekAgo.setDate(weekAgo.getDate() - 7);
 
     // Scoped execution logs matching workspace_id
-    const { count: recentExecutions } = await supabase
+    const { count: recentExecutions } = await client
       .from('execution_logs')
       .select('id, skills_sops!inner(workspace_id)', { count: 'exact', head: true })
       .eq('skills_sops.workspace_id', workspaceId)
       .gte('created_at', weekAgo.toISOString());
 
-    const { data: threads } = await supabase
+    const { data: threads } = await client
       .from('raw_threads')
       .select('source')
       .eq('workspace_id', workspaceId);
@@ -204,9 +206,10 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
     const { title, category, trigger_condition, preconditions, execution_steps, status, risk_level, requires_human_gate } = req.body;
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
 
     // Check if the SOP belongs to the user's workspace
-    const { data: checkSop } = await supabase
+    const { data: checkSop } = await client
       .from('skills_sops')
       .select('workspace_id')
       .eq('id', id)
@@ -247,7 +250,7 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
       updatePayload.is_stale = false;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('skills_sops')
       .update(updatePayload)
       .eq('id', id)
@@ -272,9 +275,10 @@ router.post('/:id/confirm', async (req: Request, res: Response): Promise<void> =
     const { id } = req.params;
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
 
     // Check if the SOP belongs to the user's workspace
-    const { data: checkSop } = await supabase
+    const { data: checkSop } = await client
       .from('skills_sops')
       .select('workspace_id')
       .eq('id', id)
@@ -308,9 +312,10 @@ router.get('/:id/versions', async (req: Request, res: Response): Promise<void> =
     const { id } = req.params;
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
 
     // Check if the SOP belongs to the user's workspace
-    const { data: checkSop } = await supabase
+    const { data: checkSop } = await client
       .from('skills_sops')
       .select('workspace_id')
       .eq('id', id)
@@ -326,7 +331,7 @@ router.get('/:id/versions', async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('sop_versions')
       .select('*')
       .eq('sop_id', id)
@@ -350,9 +355,10 @@ router.delete('/:id', requireRole(['admin', 'approver']), async (req: Request, r
     const { id } = req.params;
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
 
     // Check if the SOP belongs to the user's workspace
-    const { data: checkSop } = await supabase
+    const { data: checkSop } = await client
       .from('skills_sops')
       .select('workspace_id')
       .eq('id', id)
@@ -368,7 +374,7 @@ router.delete('/:id', requireRole(['admin', 'approver']), async (req: Request, r
       return;
     }
 
-    const { error } = await supabase
+    const { error } = await client
       .from('skills_sops')
       .delete()
       .eq('id', id);
@@ -388,8 +394,9 @@ router.delete('/:id', requireRole(['admin', 'approver']), async (req: Request, r
 
 router.post('/check-staleness', requireRole(['admin', 'approver']), async (req: Request, res: Response): Promise<void> => {
   try {
+    const user = (req as AuthenticatedRequest).user!;
     const thresholdDays = parseInt(req.query.days as string) || 30;
-    const count = await markStaleSOPs(thresholdDays);
+    const count = await markStaleSOPs(thresholdDays, user.workspace_id);
     res.json({ message: `Staleness sweep complete. ${count} SOPs marked stale.`, stale_count: count });
   } catch (err) {
     res.status(500).json({ error: 'Failed to run staleness sweep' });

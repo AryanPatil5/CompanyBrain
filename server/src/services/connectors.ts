@@ -115,12 +115,11 @@ export function normalizeLinear(body: any): ThreadPayload | null {
         timestamp: m.timestamp,
       })),
     };
-  }
-
-  const data = body.data;
+  }  const data = body.data;
   if (!data) return null;
 
-  const workspaceId = body.workspace_id || body.organizationId || 'default';
+  const workspaceId = body.workspace_id;
+  if (!workspaceId) return null;
   const teamKey = data.team?.key || data.teamId || 'unknown-team';
   const issueId = data.id || data.issueId || `lin-${Date.now()}`;
   const threadId = `lin-${issueId}`;
@@ -185,7 +184,8 @@ export function normalizeZendesk(body: any): ThreadPayload | null {
   const ticket = body.ticket || body;
   if (!ticket || !ticket.id) return null;
 
-  const workspaceId = body.workspace_id || 'default';
+  const workspaceId = body.workspace_id;
+  if (!workspaceId) return null;
   const threadId = `zen-ticket-${ticket.id}`;
   const group = ticket.group_name || 'support';
 
@@ -225,10 +225,11 @@ export function normalizeZendesk(body: any): ThreadPayload | null {
  */
 export function normalizeEmail(body: any): ThreadPayload | null {
   const { workspace_id, external_thread_id, subject, messages, from } = body;
+  if (!workspace_id) return null;
 
-  if (body.workspace_id && Array.isArray(messages)) {
+  if (Array.isArray(messages)) {
     return {
-      workspace_id: body.workspace_id,
+      workspace_id,
       source: 'email',
       external_thread_id: external_thread_id || `email-${Date.now()}`,
       channel_or_project: subject || 'inbox',
@@ -243,7 +244,7 @@ export function normalizeEmail(body: any): ThreadPayload | null {
   if (!body.body && !body.text) return null;
 
   return {
-    workspace_id: workspace_id || 'default',
+    workspace_id,
     source: 'email',
     external_thread_id: external_thread_id || `email-${Date.now()}`,
     channel_or_project: subject || 'inbox',
@@ -262,10 +263,11 @@ export function normalizeEmail(body: any): ThreadPayload | null {
  */
 export function normalizeDatabase(body: any): ThreadPayload | null {
   const { workspace_id, database_name, runbook_name, queries, notes } = body;
+  if (!workspace_id) return null;
 
-  if (body.workspace_id && Array.isArray(body.messages)) {
+  if (Array.isArray(body.messages)) {
     return {
-      workspace_id: body.workspace_id,
+      workspace_id,
       source: 'database',
       external_thread_id: body.external_thread_id || `db-${Date.now()}`,
       channel_or_project: database_name || 'postgres',
@@ -276,7 +278,7 @@ export function normalizeDatabase(body: any): ThreadPayload | null {
   if (!notes && !queries) return null;
 
   return {
-    workspace_id: workspace_id || 'default',
+    workspace_id,
     source: 'database',
     external_thread_id: `db-${database_name || 'main'}-${Date.now()}`,
     channel_or_project: database_name || 'postgres',
@@ -295,15 +297,14 @@ export function normalizeDatabase(body: any): ThreadPayload | null {
  */
 export function normalizeDirectTeach(body: any): ThreadPayload | null {
   const { workspace_id, title, category, author, description, steps } = body;
-
-  if (!title || !description) return null;
+  if (!workspace_id || !title || !description) return null;
 
   const formattedSteps = Array.isArray(steps) && steps.length > 0
     ? steps.map((s: any, i: number) => `Step ${i + 1}: ${typeof s === 'string' ? s : s.instruction || s.action}`).join('\n')
     : '';
 
   return {
-    workspace_id: workspace_id || '00000000-0000-0000-0000-000000000000',
+    workspace_id,
     source: 'direct_teach',
     external_thread_id: `teach-${Date.now()}`,
     channel_or_project: category || 'Tacit Knowledge',

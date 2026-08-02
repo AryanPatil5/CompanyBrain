@@ -81,17 +81,22 @@ export async function createVersion(
  * Marks SOPs as stale if they haven't been confirmed within the threshold.
  * Returns the number of SOPs marked stale.
  */
-export async function markStaleSOPs(thresholdDays: number = 30): Promise<number> {
+export async function markStaleSOPs(thresholdDays: number = 30, workspaceId?: string): Promise<number> {
   try {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - thresholdDays);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('skills_sops')
       .update({ is_stale: true, updated_at: new Date().toISOString() })
       .eq('is_stale', false)
-      .lt('last_confirmed_at', cutoff.toISOString())
-      .select('id');
+      .lt('last_confirmed_at', cutoff.toISOString());
+
+    if (workspaceId) {
+      query = query.eq('workspace_id', workspaceId);
+    }
+
+    const { data, error } = await query.select('id');
 
     if (error) {
       console.error('[Freshness] Staleness sweep error:', error);
