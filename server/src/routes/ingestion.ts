@@ -12,7 +12,15 @@ import {
   type ThreadPayload,
 } from '../services/connectors.js';
 import { detectConflict, createVersion } from '../services/freshness.js';
-import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature, resolveWorkspaceForWebhook } from './connectors.js';
+import {
+  verifySlackSignature,
+  verifyGitHubSignature,
+  verifyLinearSignature,
+  resolveWorkspaceForWebhook,
+  resolveSlackWorkspaceMiddleware,
+  resolveGitHubWorkspaceMiddleware,
+  resolveLinearWorkspaceMiddleware,
+} from './connectors.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { generateEmbedding } from '../services/embeddings.js';
 import { getTenantClient } from '../middleware/tenantClient.js';
@@ -175,23 +183,8 @@ async function processThread(
 
 // ─── Webhook Routes ──────────────────────────────────────────
 
-router.post('/webhook', webhookLimiter, verifySlackSignature, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook', verifySlackSignature, resolveSlackWorkspaceMiddleware(), webhookLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const externalOrgId = req.body.team_id || req.body.team?.id;
-    if (!externalOrgId) {
-      res.status(400).json({ error: 'Missing team_id in Slack webhook payload.' });
-      return;
-    }
-
-    const serverWorkspaceId = await resolveWorkspaceForWebhook('slack', externalOrgId);
-    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
-      res.status(403).json({ error: 'This Slack workspace is not registered with Company Brain.' });
-      return;
-    }
-
-    // Override req.body.workspace_id with verified server-side workspace ID
-    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
-
     const payload = normalizeSlack(req.body);
     if (!payload) {
       res.status(400).json({ error: 'Missing required payload parameters or invalid messages format.' });
@@ -204,22 +197,8 @@ router.post('/webhook', webhookLimiter, verifySlackSignature, async (req: Reques
   }
 });
 
-router.post('/webhook/github', webhookLimiter, verifyGitHubSignature, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/github', verifyGitHubSignature, resolveGitHubWorkspaceMiddleware(), webhookLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const externalOrgId = req.body.installation?.id || req.body.repository?.owner?.id || req.body.org;
-    if (!externalOrgId) {
-      res.status(400).json({ error: 'Missing installation_id or owner in GitHub webhook payload.' });
-      return;
-    }
-
-    const serverWorkspaceId = await resolveWorkspaceForWebhook('github', String(externalOrgId));
-    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
-      res.status(403).json({ error: 'This GitHub organization is not registered with Company Brain.' });
-      return;
-    }
-
-    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
-
     const payload = normalizeGitHub(req.body);
     if (!payload) {
       res.status(400).json({ error: 'Invalid GitHub payload.' });
@@ -231,22 +210,8 @@ router.post('/webhook/github', webhookLimiter, verifyGitHubSignature, async (req
   }
 });
 
-router.post('/webhook/linear', webhookLimiter, verifyLinearSignature, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/linear', verifyLinearSignature, resolveLinearWorkspaceMiddleware(), webhookLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
-    const externalOrgId = req.body.organizationId || req.body.org_id;
-    if (!externalOrgId) {
-      res.status(400).json({ error: 'Missing organizationId in Linear webhook payload.' });
-      return;
-    }
-
-    const serverWorkspaceId = await resolveWorkspaceForWebhook('linear', String(externalOrgId));
-    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
-      res.status(403).json({ error: 'This Linear organization is not registered with Company Brain.' });
-      return;
-    }
-
-    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
-
     const payload = normalizeLinear(req.body);
     if (!payload) {
       res.status(400).json({ error: 'Invalid Linear payload.' });
@@ -258,7 +223,7 @@ router.post('/webhook/linear', webhookLimiter, verifyLinearSignature, async (req
   }
 });
 
-router.post('/webhook/zendesk', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/zendesk', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeZendesk({
@@ -275,7 +240,7 @@ router.post('/webhook/zendesk', ingestionLimiter, authenticate, async (req: Requ
   }
 });
 
-router.post('/webhook/email', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/email', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeEmail({
@@ -292,7 +257,7 @@ router.post('/webhook/email', ingestionLimiter, authenticate, async (req: Reques
   }
 });
 
-router.post('/webhook/database', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/database', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeDatabase({
@@ -309,7 +274,7 @@ router.post('/webhook/database', ingestionLimiter, authenticate, async (req: Req
   }
 });
 
-router.post('/webhook/teach', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/teach', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeDirectTeach({

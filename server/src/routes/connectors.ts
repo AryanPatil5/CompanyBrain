@@ -29,6 +29,66 @@ export async function resolveWorkspaceForWebhook(
   return null;
 }
 
+/**
+ * Middleware for resolving Slack team_id to internal workspace_id before rate limiting
+ */
+export function resolveSlackWorkspaceMiddleware() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const externalOrgId = req.body?.team_id || req.body?.team?.id;
+    if (!externalOrgId) {
+      return res.status(400).json({ error: 'Missing team_id in Slack webhook payload.' });
+    }
+
+    const serverWorkspaceId = await resolveWorkspaceForWebhook('slack', externalOrgId);
+    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'This Slack workspace is not registered with Company Brain.' });
+    }
+
+    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
+    return next();
+  };
+}
+
+/**
+ * Middleware for resolving GitHub installation_id to internal workspace_id before rate limiting
+ */
+export function resolveGitHubWorkspaceMiddleware() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const externalOrgId = req.body?.installation?.id || req.body?.repository?.owner?.id || req.body?.org;
+    if (!externalOrgId) {
+      return res.status(400).json({ error: 'Missing installation_id or owner in GitHub webhook payload.' });
+    }
+
+    const serverWorkspaceId = await resolveWorkspaceForWebhook('github', String(externalOrgId));
+    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'This GitHub organization is not registered with Company Brain.' });
+    }
+
+    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
+    return next();
+  };
+}
+
+/**
+ * Middleware for resolving Linear organizationId to internal workspace_id before rate limiting
+ */
+export function resolveLinearWorkspaceMiddleware() {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const externalOrgId = req.body?.organizationId || req.body?.org_id;
+    if (!externalOrgId) {
+      return res.status(400).json({ error: 'Missing organizationId in Linear webhook payload.' });
+    }
+
+    const serverWorkspaceId = await resolveWorkspaceForWebhook('linear', String(externalOrgId));
+    if (!serverWorkspaceId && process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'This Linear organization is not registered with Company Brain.' });
+    }
+
+    req.body.workspace_id = serverWorkspaceId || req.body.workspace_id || '00000000-0000-0000-0000-000000000000';
+    return next();
+  };
+}
+
 // Middleware for Slack Webhook signature verification
 export function verifySlackSignature(req: Request, res: Response, next: NextFunction) {
   const isProd = process.env.NODE_ENV === 'production';
