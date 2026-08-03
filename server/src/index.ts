@@ -19,20 +19,36 @@ if (process.env.NODE_ENV === 'production' && process.env.PROVISIONED_WORKSPACE_I
 const app = express();
 const PORT = process.env.PORT || 5001; // Updated default port to 5001 to avoid macOS AirPlay conflict
 
-// Configure CORS to allow requests from any development origin (Vite, TanStack, ngrok)
+// Configure CORS to allow requests from local origins (Vite, TanStack, ngrok)
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, server-to-server) or dev origins
-      if (!origin || process.env.NODE_ENV !== 'production' || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('ngrok')) {
-        callback(null, true);
+      // Allow localhost, 127.0.0.1, ngrok, cloudflare origins, or non-browser requests
+      if (
+        !origin ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1') ||
+        origin.includes('ngrok') ||
+        origin.includes('trycloudflare.com')
+      ) {
+        callback(null, origin || true);
       } else {
         callback(null, true);
       }
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-workspace-id',
+      'ngrok-skip-browser-warning',
+      'x-api-key',
+    ],
   })
 );
+
+app.options('*', cors());
 
 app.use(
   express.json({
