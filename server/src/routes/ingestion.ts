@@ -332,6 +332,7 @@ router.post('/run', authenticate, ingestionLimiter, async (req: Request, res: Re
       success: true,
       jobId,
       status: 'queued',
+      message: 'Ingestion job enqueued successfully.',
     });
   } catch (error) {
     console.error('[Ingestion Run Error]:', error);
