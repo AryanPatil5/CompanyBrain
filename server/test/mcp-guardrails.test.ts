@@ -629,6 +629,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 36: System Observability, Latency Metrics & Token Accounting ───
+  try {
+    const { runObservabilityTest } = await import('./middleware/observability.test.js');
+    const obsSuccess = await runObservabilityTest();
+    if (obsSuccess) {
+      console.log("✅ TEST 36 PASSED: Observability Middleware tracked request latencies, agent state transitions, and LLM token metrics.");
+      passed++;
+    } else {
+      console.error("❌ TEST 36 FAILED: Observability test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 36 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

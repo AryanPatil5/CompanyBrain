@@ -8,6 +8,8 @@ import { startMCPServer } from './services/mcp.js';
 import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
 import { startIngestionWorker, stopIngestionWorker } from './workers/ingestionWorker.js';
 
+import { observabilityMiddleware, getMetricsSnapshot } from './middleware/observability.js';
+
 dotenv.config();
 
 export const DEV_SEED_WORKSPACE_ID = process.env.DEV_SEED_WORKSPACE_ID || '00000000-0000-0000-0000-000000000000';
@@ -18,6 +20,8 @@ if (process.env.NODE_ENV === 'production' && process.env.PROVISIONED_WORKSPACE_I
 
 const app = express();
 const PORT = process.env.PORT || 5001; // Updated default port to 5001 to avoid macOS AirPlay conflict
+
+app.use(observabilityMiddleware());
 
 // Configure CORS to allow requests from local origins (Vite, TanStack, ngrok)
 app.use(
@@ -65,6 +69,10 @@ app.use('/api/integrations', integrationsRouter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'Company Brain Backend' });
+});
+
+app.get('/api/metrics', (_req, res) => {
+  res.json(getMetricsSnapshot());
 });
 
 // Start Express API Server
