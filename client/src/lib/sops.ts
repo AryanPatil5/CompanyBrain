@@ -142,7 +142,7 @@ export async function fetchSops(): Promise<{ sops: Sop[]; live: boolean }> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch("http://localhost:5001/api/sops", {
+    const res = await fetch(`${API_BASE_URL}/api/sops`, {
       headers: { "Authorization": `Bearer ${getToken()}` },
       signal: controller.signal,
     });
@@ -167,7 +167,7 @@ export async function fetchSops(): Promise<{ sops: Sop[]; live: boolean }> {
 
 export async function approveSopApi(id: string): Promise<boolean> {
   try {
-    const res = await fetch(`http://localhost:5001/api/sops/${id}`, {
+    const res = await fetch(`${API_BASE_URL}/api/sops/${id}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -184,7 +184,7 @@ export async function approveSopApi(id: string): Promise<boolean> {
 
 export async function confirmSopApi(id: string): Promise<boolean> {
   try {
-    const res = await fetch(`http://localhost:5001/api/sops/${id}/confirm`, {
+    const res = await fetch(`${API_BASE_URL}/api/sops/${id}/confirm`, {
       method: "POST",
       headers: { "Authorization": `Bearer ${getToken()}` },
     });
@@ -199,7 +199,7 @@ export async function fetchAnalytics(): Promise<Analytics | null> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch("http://localhost:5001/api/sops/analytics", {
+    const res = await fetch(`${API_BASE_URL}/api/sops/analytics`, {
       headers: { "Authorization": `Bearer ${getToken()}` },
       signal: controller.signal,
     });
@@ -214,7 +214,7 @@ export async function fetchAnalytics(): Promise<Analytics | null> {
 
 export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
   try {
-    const res = await fetch(`http://localhost:5001/api/sops/${sopId}/versions`, {
+    const res = await fetch(`${API_BASE_URL}/api/sops/${sopId}/versions`, {
       headers: { "Authorization": `Bearer ${getToken()}` },
     });
     if (!res.ok) return [];
@@ -227,7 +227,7 @@ export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
 
 export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
   try {
-    const res = await fetch("http://localhost:5001/api/sops/approvals", {
+    const res = await fetch(`${API_BASE_URL}/api/sops/approvals`, {
       headers: { "Authorization": `Bearer ${getToken()}` },
     });
     if (!res.ok) return [];
@@ -240,7 +240,7 @@ export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
 
 export async function resolveApprovalApi(approvalId: string, status: "approved" | "rejected"): Promise<boolean> {
   try {
-    const res = await fetch(`http://localhost:5001/api/sops/approvals/${approvalId}`, {
+    const res = await fetch(`${API_BASE_URL}/api/sops/approvals/${approvalId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -262,7 +262,7 @@ export async function teachBrainApi(payload: {
   author?: string;
 }): Promise<boolean> {
   try {
-    const res = await fetch("http://localhost:5001/api/ingestion/webhook/teach", {
+    const res = await fetch(`${API_BASE_URL}/api/ingestion/webhook/teach`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -287,7 +287,7 @@ export interface ElicitationResponse {
 
 export async function elicitSopQuestionsApi(sopDraft: Partial<Sop>): Promise<ElicitationResponse> {
   try {
-    const res = await fetch("http://localhost:5001/api/ingestion/interview", {
+    const res = await fetch(`${API_BASE_URL}/api/ingestion/interview`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

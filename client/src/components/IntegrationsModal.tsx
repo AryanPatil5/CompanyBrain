@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Plug, CheckCircle2, ShieldCheck, ExternalLink, Trash2, AlertCircle, Settings, Sparkles } from "lucide-react";
 import { OAuthSetupWizard } from "./OAuthSetupWizard";
+import { API_BASE_URL } from "../lib/api-config";
 
 interface IntegrationStatus {
   provider: string;
@@ -30,7 +31,7 @@ export function IntegrationsModal({
     setError(null);
     try {
       const token = localStorage.getItem("token") || "mock-admin-token";
-      const res = await fetch("http://localhost:5001/api/integrations/status", {
+      const res = await fetch(`${API_BASE_URL}/api/integrations/status`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -60,7 +61,7 @@ export function IntegrationsModal({
       setError(null);
       const token = localStorage.getItem("token") || "mock-admin-token";
 
-      const res = await fetch(`http://localhost:5001/api/integrations/${provider}/connect-url`, {
+      const res = await fetch(`${API_BASE_URL}/api/integrations/${provider}/connect-url`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -87,7 +88,7 @@ export function IntegrationsModal({
   const handleDisconnect = async (provider: string) => {
     try {
       const token = localStorage.getItem("token") || "mock-admin-token";
-      const res = await fetch(`http://localhost:5001/api/integrations/${provider}/disconnect`, {
+      const res = await fetch(`${API_BASE_URL}/api/integrations/${provider}/disconnect`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,

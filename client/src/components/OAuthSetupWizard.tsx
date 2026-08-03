@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { X, KeyRound, Copy, Check, ExternalLink, ShieldCheck, ArrowRight } from "lucide-react";
+import { API_BASE_URL } from "../lib/api-config";
 
 interface OAuthSetupWizardProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ export function OAuthSetupWizard({
 
   if (!isOpen) return null;
 
-  const appBaseUrl = "http://localhost:5001";
+  const appBaseUrl = API_BASE_URL;
 
   const getCallbackUrl = () => {
     if (activeTab === "slack") return `${appBaseUrl}/api/integrations/slack/callback`;
@@ -44,7 +45,7 @@ export function OAuthSetupWizard({
 
     try {
       const token = localStorage.getItem("token") || "mock-admin-token";
-      const res = await fetch(`http://localhost:5001/api/integrations/platform-config/${activeTab}`, {
+      const res = await fetch(`${API_BASE_URL}/api/integrations/platform-config/${activeTab}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -91,7 +92,7 @@ export function OAuthSetupWizard({
       docLink: "https://github.com/settings/apps",
       steps: [
         "Create a GitHub App at Settings -> Developer settings -> GitHub Apps",
-        "Set Webhook URL to http://localhost:5001/api/ingestion/webhook/github",
+        `Set Webhook URL to ${API_BASE_URL}/api/ingestion/webhook/github`,
         "Set Callback URL below",
         "Copy GitHub App Slug Name below",
       ],
