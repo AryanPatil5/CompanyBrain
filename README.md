@@ -81,11 +81,38 @@ Run database migrations in Supabase SQL Editor:
 13. `server/supabase/013_rls_hardening_remaining_tables.sql`
 14. `server/supabase/014_user_workspace_roles.sql`
 15. `server/supabase/015_custom_access_token_hook.sql`
+16. `server/supabase/016_integration_credentials.sql`
+17. `server/supabase/017_oauth_state_nonces.sql`
 
 #### Custom Access Token Hook Setup (Supabase Dashboard)
 1. Go to **Supabase Dashboard** -> **Authentication** -> **Hooks (Beta)**.
 2. Enable **Custom Access Token Hook**.
 3. Select scheme: `public.custom_access_token_hook`.
+
+### Connecting Slack, GitHub & Gmail (OAuth Setup)
+
+To allow workspace administrators to connect integrations via the UI's **Settings → Integrations** modal:
+
+#### 1. Slack OAuth App Setup
+- Create a Slack App at [api.slack.com/apps](https://api.slack.com/apps).
+- Go to **OAuth & Permissions** -> Add Redirect URL: `{APP_BASE_URL}/api/integrations/slack/callback` (e.g. `http://localhost:5001/api/integrations/slack/callback`).
+- Under **Bot Token Scopes**, add `channels:history`, `channels:read`, `chat:write`.
+- Copy **Client ID**, **Client Secret**, and **Signing Secret** into `server/.env` (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`).
+
+#### 2. GitHub App Setup
+- Create a GitHub App at **Settings** -> **Developer settings** -> **GitHub Apps**.
+- Set **Webhook URL** to `{APP_BASE_URL}/api/ingestion/webhook/github`.
+- Set **Setup / Callback URL** to `{APP_BASE_URL}/api/integrations/github/callback`.
+- Copy the App's URL slug into `GITHUB_APP_NAME` and the Webhook secret into `GITHUB_WEBHOOK_SECRET` in `server/.env`.
+
+#### 3. Gmail OAuth Client Setup
+- Open [Google Cloud Console](https://console.cloud.google.com) -> **APIs & Services** -> **Credentials**.
+- Click **Create Credentials** -> **OAuth client ID** -> Select **Web application**.
+- Add Authorized Redirect URI: `{APP_BASE_URL}/api/integrations/gmail/callback`.
+- Enable the **Gmail API** under Library.
+- Copy **Client ID** and **Client Secret** into `server/.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
+
+*Once configured, workspace admins can connect each provider directly from the UI's Settings -> Integrations modal without manual database or `.env` modifications.*
 
 #### Provision Admin & Team Users
 Provision initial admin users with assigned workspace roles using the server script:
