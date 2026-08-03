@@ -485,6 +485,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 27: Ontology Compiler & Knowledge Graph Triple Validation ───
+  try {
+    const { runOntologyCompilerTest } = await import('./graph/ontologyCompiler.test.js');
+    const ontologySuccess = await runOntologyCompilerTest();
+    if (ontologySuccess) {
+      console.log("✅ TEST 27 PASSED: Knowledge Graph Ontology Compiler validated compliant node types, predicates, and batch compilation.");
+      passed++;
+    } else {
+      console.error("❌ TEST 27 FAILED: Ontology compiler test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 27 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
