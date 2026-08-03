@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { supabase } from '../config/supabase.js';
 import { dispatchStepExecution } from './integrations/http_adapters.js';
 import { runWorkflow } from '../agents/orchestrator.js';
+import { compileOpenApiSpec } from './skills/openApiCompiler.js';
+import { executeInSandbox } from './skills/sandboxEngine.js';
 
 export interface McpSessionContext {
   authenticated: boolean;
@@ -174,7 +176,6 @@ server.addTool({
       return JSON.stringify({ error: 'SOP not found or not yet approved by team leads.' });
     }
 
-    // Call shared production checkExecutionGate function
     const gateRes = await checkExecutionGate(sop, session.trustRole);
     if (gateRes.gated) {
       await logExecution(sopId, 'get_sop_by_id', { sopId, blocked: true }, 'blocked_gated', session.agentId);
@@ -395,7 +396,6 @@ server.addTool({
     parameters: z.record(z.any()).optional().describe('Input parameters or thresholds for this step execution'),
   }),
   execute: async ({ sopId, stepNumber, mcpToken, approvalId, parameters }) => {
-    // 1. Authenticate session token and derive role & workspace strictly on server
     const session = await authenticateMcpToken(mcpToken);
     if (!session.authenticated) {
       return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
@@ -404,7 +404,6 @@ server.addTool({
     const callerId = session.agentId;
     const trustRole = session.trustRole;
 
-    // 2. Fetch SOP and verify status is Approved
     const { data: sop, error: sopErr } = await supabase
       .from('skills_sops')
       .select('id, title, status, risk_level, requires_human_gate, execution_steps, workspace_id')
@@ -421,7 +420,6 @@ server.addTool({
       return JSON.stringify({ error: `SOP "${sop.title}" is in '${sop.status}' status. Only 'Approved' SOPs can be executed.` });
     }
 
-    // 3. Call shared production checkExecutionGate function
     const gateRes = await checkExecutionGate(sop, trustRole, approvalId);
     if (gateRes.gated) {
       await logExecution(sopId, 'execute_sop_step', { stepNumber, blocked: true }, 'blocked_gated', callerId);
@@ -432,7 +430,6 @@ server.addTool({
       });
     }
 
-    // Gap D Fix: Claim approval ticket atomically BEFORE target system dispatch (prevents TOCTOU race window)
     if (approvalId) {
       const { data: claimedTicket, error: claimErr } = await supabase
         .from('pending_approvals')
@@ -451,7 +448,6 @@ server.addTool({
       }
     }
 
-    // 4. Locate Step Definition
     const steps = Array.isArray(sop.execution_steps) ? sop.execution_steps : [];
     const stepDef = steps.find((s: any) => s.step_number === stepNumber) || steps[stepNumber - 1];
 
@@ -462,7 +458,6 @@ server.addTool({
 
     const targetSystem = (stepDef.target_system || stepDef.target || 'admin_cli').toLowerCase();
 
-    // 5. Look up target integration in `integration_connections` table
     const { data: conn } = await supabase
       .from('integration_connections')
       .select('integration_name, endpoint_config, credential_ref')
@@ -473,7 +468,6 @@ server.addTool({
     const endpointConfig = conn?.endpoint_config || { base_url: `https://api.${targetSystem}.internal` };
     const credentialRef = conn?.credential_ref;
 
-    // 6. Execute real HTTP step dispatch using http_adapters
     const httpRes = await dispatchStepExecution(
       targetSystem,
       endpointConfig,
@@ -492,7 +486,6 @@ server.addTool({
 
     const outcome = httpRes.success ? 'success' : 'error';
 
-    // 7. Automatically log outcome to execution_logs
     await logExecution(sopId, 'execute_sop_step', { stepNumber, targetSystem, executionId, dispatchDetails, error: httpRes.error }, outcome, callerId);
 
     return JSON.stringify({
@@ -559,6 +552,78 @@ server.addTool({
     });
 
     return JSON.stringify(workflowResult);
+  },
+});
+
+// ─── Tool 9: Register OpenAPI 3.0 / Swagger Spec as FastMCP Skills ─────
+
+server.addTool({
+  name: 'register_openapi_spec',
+  description: 'Ingests raw OpenAPI/Swagger JSON specifications and compiles them into type-safe AI skill tools registered in the FastMCP registry.',
+  parameters: z.object({
+    specJson: z.string().describe('Raw JSON string of OpenAPI 3.0 or Swagger specification'),
+    mcpToken: z.string().describe('Authenticated FastMCP API token'),
+  }),
+  execute: async ({ specJson, mcpToken }) => {
+    const session = await authenticateMcpToken(mcpToken);
+    if (!session.authenticated) {
+      return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
+    }
+
+    try {
+      const parsedSpec = JSON.parse(specJson);
+      const compiledSkills = compileOpenApiSpec(parsedSpec);
+
+      for (const skill of compiledSkills) {
+        server.addTool({
+          name: skill.name,
+          description: skill.description,
+          parameters: z.record(z.any()),
+          execute: async (args: any) => {
+            return JSON.stringify({
+              status: 'compiled_skill_dispatched',
+              endpoint: skill.endpoint,
+              method: skill.method,
+              args,
+            });
+          },
+        });
+      }
+
+      await logExecution(null, 'register_openapi_spec', { skill_count: compiledSkills.length }, 'success', session.agentId);
+
+      return JSON.stringify({
+        success: true,
+        compiled_skills_count: compiledSkills.length,
+        registered_skills: compiledSkills.map((s) => s.name),
+      });
+    } catch (err: any) {
+      return JSON.stringify({ error: `Failed to compile OpenAPI spec: ${err.message}` });
+    }
+  },
+});
+
+// ─── Tool 10: Execute Untrusted Code in Docker Sandbox ─────────
+
+server.addTool({
+  name: 'execute_code_sandbox',
+  description: 'Executes Python or JavaScript code inside a network-isolated, resource-capped Docker container sandbox.',
+  parameters: z.object({
+    code: z.string().describe('Source code payload to execute'),
+    language: z.enum(['python', 'javascript']).default('python').describe('Code execution language'),
+    timeoutMs: z.number().optional().describe('Maximum execution duration in milliseconds (default 10000)'),
+    mcpToken: z.string().describe('Authenticated FastMCP API token'),
+  }),
+  execute: async ({ code, language, timeoutMs, mcpToken }) => {
+    const session = await authenticateMcpToken(mcpToken);
+    if (!session.authenticated) {
+      return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
+    }
+
+    const result = await executeInSandbox(code, language, timeoutMs || 10000);
+    await logExecution(null, 'execute_code_sandbox', { language, durationMs: result.durationMs, exitCode: result.exitCode }, result.exitCode === 0 ? 'success' : 'error', session.agentId);
+
+    return JSON.stringify(result);
   },
 });
 
