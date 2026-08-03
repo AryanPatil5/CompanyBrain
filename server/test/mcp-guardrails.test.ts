@@ -549,6 +549,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 31: Master-Key KMS AES-256-GCM Envelope Encryption & Tamper Detection ───
+  try {
+    const { runKmsEncryptionTest } = await import('./security/kmsEncryption.test.js');
+    const kmsSuccess = await runKmsEncryptionTest();
+    if (kmsSuccess) {
+      console.log("✅ TEST 31 PASSED: KMS AES-256-GCM envelope encryption verified with 12-byte IVs, authTag tamper detection, and exact decryption.");
+      passed++;
+    } else {
+      console.error("❌ TEST 31 FAILED: KMS encryption test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 31 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
