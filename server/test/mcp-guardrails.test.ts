@@ -645,6 +645,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 37: Enterprise SIEM Structured Audit Logging & Database Persistence ───
+  try {
+    const { runAuditLoggerTest } = await import('./services/auditLogger.test.js');
+    const auditSuccess = await runAuditLoggerTest();
+    if (auditSuccess) {
+      console.log("✅ TEST 37 PASSED: SIEM Audit Logger generated structured JSON audit events to stdout and persisted records asynchronously to database.");
+      passed++;
+    } else {
+      console.error("❌ TEST 37 FAILED: SIEM Audit Logger test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 37 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
