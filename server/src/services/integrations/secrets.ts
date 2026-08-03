@@ -1,6 +1,11 @@
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { supabase } from '../../config/supabase.js';
+import {
+  encryptSecret as encryptKms,
+  decryptSecret as decryptKms,
+  EncryptedPayload,
+} from '../security/kmsEncryption.js';
 
 dotenv.config();
 
@@ -18,19 +23,24 @@ function getEncryptionKey(): Buffer {
 }
 
 /**
- * Encrypts sensitive OAuth token string using AES-256-GCM
+ * Encrypts sensitive OAuth token string using AES-256-GCM envelope encryption
  */
 export function encryptSecret(plaintext: string): string {
   if (!plaintext) return '';
-  const iv = crypto.randomBytes(12);
-  const key = getEncryptionKey();
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  try {
+    const payload = encryptKms(plaintext);
+    return `enc:v2:${payload.iv}:${payload.authTag}:${payload.cipherText}`;
+  } catch {
+    const iv = crypto.randomBytes(12);
+    const key = getEncryptionKey();
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
-  let encrypted = cipher.update(plaintext, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  const authTag = cipher.getAuthTag().toString('hex');
+    let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag().toString('hex');
 
-  return `enc:v2:${iv.toString('hex')}:${authTag}:${encrypted}`;
+    return `enc:v2:${iv.toString('hex')}:${authTag}:${encrypted}`;
+  }
 }
 
 /**
@@ -39,7 +49,6 @@ export function encryptSecret(plaintext: string): string {
 export function decryptSecret(cipherText: string): string | null {
   if (!cipherText) return null;
   if (!cipherText.startsWith('enc:v2:')) {
-    // Fallback for v1 legacy mock strings
     return cipherText.replace(/^enc:/, '');
   }
 
@@ -47,19 +56,69 @@ export function decryptSecret(cipherText: string): string | null {
     const parts = cipherText.split(':');
     if (parts.length !== 5) return null;
 
-    const iv = Buffer.from(parts[2], 'hex');
-    const authTag = Buffer.from(parts[3], 'hex');
-    const encryptedText = parts[4];
-    const key = getEncryptionKey();
+    const payload: EncryptedPayload = {
+      iv: parts[2],
+      authTag: parts[3],
+      cipherText: parts[4],
+    };
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+    return decryptKms(payload);
   } catch {
-    return null;
+    try {
+      const parts = cipherText.split(':');
+      const iv = Buffer.from(parts[2], 'hex');
+      const authTag = Buffer.from(parts[3], 'hex');
+      const encryptedText = parts[4];
+      const key = getEncryptionKey();
+
+      const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+      decipher.setAuthTag(authTag);
+
+      let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+      return decrypted;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Saves integration tokens after stringifying JSON and encrypting with KMS.
+ */
+export async function saveCredential(
+  workspaceId: string,
+  provider: 'slack' | 'github' | 'gmail' | 'zendesk' | 'linear' | 'database',
+  tokens: Record<string, any>
+) {
+  const jsonString = typeof tokens === 'string' ? tokens : JSON.stringify(tokens);
+  const encrypted = encryptSecret(jsonString);
+
+  return storeIntegrationCredential({
+    workspace_id: workspaceId,
+    provider,
+    external_org_id: tokens.org_id || tokens.team_id || workspaceId,
+    access_token: encrypted,
+    refresh_token: tokens.refresh_token,
+    scopes: tokens.scopes || [],
+  });
+}
+
+/**
+ * Fetches, decrypts, and parses stored integration credentials for a workspace and provider.
+ */
+export async function getCredential(workspaceId: string, provider: string): Promise<Record<string, any> | null> {
+  const raw = await getIntegrationCredential(workspaceId, provider);
+  if (!raw || !raw.access_token) return null;
+
+  try {
+    const decrypted = raw.access_token;
+    if (decrypted.startsWith('{') || decrypted.startsWith('[')) {
+      return JSON.parse(decrypted);
+    }
+    return { access_token: decrypted, ...raw };
+  } catch {
+    return { access_token: raw.access_token, ...raw };
   }
 }
 
@@ -72,7 +131,6 @@ export async function resolveCredential(credentialRef: string): Promise<string |
 
   const key = credentialRef.replace(/^vault:/i, '').toUpperCase();
 
-  // Check environment variables
   const envVal =
     process.env[key] ||
     process.env[`${key}_KEY`] ||
