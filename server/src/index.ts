@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import ingestionRouter from './routes/ingestion.js';
 import sopsRouter from './routes/sops.js';
+import integrationsRouter from './routes/integrations.js';
 import { startMCPServer } from './services/mcp.js';
 import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
 
@@ -45,6 +46,7 @@ app.use(
 // Register API Routes
 app.use('/api/ingestion', ingestionRouter);
 app.use('/api/sops', sopsRouter);
+app.use('/api/integrations', integrationsRouter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'Company Brain Backend' });

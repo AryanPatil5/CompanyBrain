@@ -49,14 +49,33 @@ async function markEmailThreadCrawled(emailId: string, inbox: string): Promise<v
 }
 
 /**
- * Crawls shared ops inbox threads via Gmail / MS Graph REST APIs.
+ * Crawls shared ops inbox threads via Gmail / MS Graph REST APIs per workspace.
  */
 export async function crawlEmailInbox(
   inbox: string = process.env.OPS_INBOX_EMAIL || 'ops-support@company.com',
   workspaceId: string = '00000000-0000-0000-0000-000000000000'
 ): Promise<EmailCrawlResult> {
-  if (!GMAIL_TOKEN) {
-    console.log('[INFO] [Email Crawler] GMAIL_API_TOKEN / MS_GRAPH_TOKEN not configured. Skipping active email inbox sweep.');
+  let effectiveToken = GMAIL_TOKEN;
+
+  // Attempt to fetch per-workspace OAuth token from integration_credentials
+  try {
+    const { data: cred } = await supabase
+      .from('integration_credentials')
+      .select('access_token_encrypted, refresh_token_encrypted')
+      .eq('workspace_id', workspaceId)
+      .eq('provider', 'gmail')
+      .eq('status', 'connected')
+      .single();
+
+    if (cred?.access_token_encrypted) {
+      effectiveToken = cred.access_token_encrypted.replace(/^enc:/, '');
+    }
+  } catch {
+    // Non-fatal fallback to env var
+  }
+
+  if (!effectiveToken) {
+    console.log('[INFO] [Email Crawler] GMAIL_API_TOKEN / Gmail OAuth token not configured. Skipping active email inbox sweep.');
     return { source: 'email', inbox, threads_crawled: 0, sops_extracted: 0, status: 'skipped' };
   }
 

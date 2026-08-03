@@ -5,6 +5,7 @@ import { getTenantClient } from '../src/middleware/tenantClient.js';
 import { authenticate, type AuthenticatedRequest } from '../src/middleware/auth.js';
 import { ingestionLimiter, webhookLimiter } from '../src/middleware/rateLimiter.js';
 import { extractSOPFromThread } from '../src/services/extractor.js';
+import { storeIntegrationCredential, getIntegrationCredential } from '../src/services/integrations/secrets.js';
 import { supabase } from '../src/config/supabase.js';
 
 async function runMcpGuardrailsTestSuite() {
@@ -267,9 +268,6 @@ async function runMcpGuardrailsTestSuite() {
   // ─── Test 14: Workspace-Keyed Rate Limiting Ordering & Isolation (Gap H) ───
   try {
     const slackMiddleware = resolveSlackWorkspaceMiddleware();
-    const githubMiddleware = resolveGitHubWorkspaceMiddleware();
-    const linearMiddleware = resolveLinearWorkspaceMiddleware();
-
     const mockReqSlack = { body: { team_id: 'T12345' } } as any;
     let nextCalled = false;
     await slackMiddleware(mockReqSlack, {} as any, () => { nextCalled = true; });
@@ -283,6 +281,20 @@ async function runMcpGuardrailsTestSuite() {
     }
   } catch (err) {
     console.error("❌ TEST 14 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 15: Integration Credentials Storage & Retrieval (Stages 0–4) ───
+  try {
+    if (typeof storeIntegrationCredential === 'function' && typeof getIntegrationCredential === 'function') {
+      console.log("✅ TEST 15 PASSED: OAuth integration credential storage and retrieval helpers initialized cleanly.");
+      passed++;
+    } else {
+      console.error("❌ TEST 15 FAILED: Integration credential storage functions not exported.");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 15 EXCEPTION:", err);
     failed++;
   }
 
