@@ -3,6 +3,7 @@ import { supabase } from '../../config/supabase.js';
 import { extractSOPFromThread } from '../extractor.js';
 import { createVersion } from '../freshness.js';
 import { generateEmbedding } from '../embeddings.js';
+import { getIntegrationCredential, storeIntegrationCredential } from '../integrations/secrets.js';
 
 dotenv.config();
 
@@ -16,9 +17,6 @@ export interface EmailCrawlResult {
   status: 'success' | 'skipped' | 'error';
 }
 
-/**
- * Checks if an email thread/message ID has already been processed in `crawled_sources`.
- */
 async function isEmailThreadCrawled(emailId: string): Promise<boolean> {
   try {
     const { data } = await supabase
@@ -33,9 +31,6 @@ async function isEmailThreadCrawled(emailId: string): Promise<boolean> {
   }
 }
 
-/**
- * Marks an email message ID as processed in `crawled_sources`.
- */
 async function markEmailThreadCrawled(emailId: string, inbox: string): Promise<void> {
   try {
     await supabase.from('crawled_sources').insert({
@@ -49,26 +44,68 @@ async function markEmailThreadCrawled(emailId: string, inbox: string): Promise<v
 }
 
 /**
- * Crawls shared ops inbox threads via Gmail / MS Graph REST APIs per workspace.
+ * Helper to refresh expired Gmail access tokens via Google OAuth API (Gap N)
+ */
+async function refreshGmailAccessToken(workspaceId: string, refreshToken: string): Promise<string | null> {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret || !refreshToken) return null;
+
+  try {
+    console.log(`[Email Crawler] Refreshing expired Gmail OAuth access token for workspace ${workspaceId}...`);
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+
+    if (!res.ok) {
+      console.warn('[Email Crawler] Token refresh failed:', await res.text());
+      return null;
+    }
+
+    const data = await res.json();
+    const newAccessToken = data.access_token;
+
+    if (newAccessToken) {
+      await storeIntegrationCredential({
+        workspace_id: workspaceId,
+        provider: 'gmail',
+        external_org_id: workspaceId,
+        access_token: newAccessToken,
+        refresh_token: refreshToken,
+      });
+      console.log(`[Email Crawler] Successfully refreshed and updated Gmail OAuth token for workspace ${workspaceId}`);
+      return newAccessToken;
+    }
+  } catch (err) {
+    console.error('[Email Crawler] Exception during token refresh:', err);
+  }
+
+  return null;
+}
+
+/**
+ * Crawls shared ops inbox threads via Gmail / MS Graph REST APIs per workspace with token refresh logic.
  */
 export async function crawlEmailInbox(
   inbox: string = process.env.OPS_INBOX_EMAIL || 'ops-support@company.com',
   workspaceId: string = '00000000-0000-0000-0000-000000000000'
 ): Promise<EmailCrawlResult> {
   let effectiveToken = GMAIL_TOKEN;
+  let storedRefreshToken: string | null = null;
 
   // Attempt to fetch per-workspace OAuth token from integration_credentials
   try {
-    const { data: cred } = await supabase
-      .from('integration_credentials')
-      .select('access_token_encrypted, refresh_token_encrypted')
-      .eq('workspace_id', workspaceId)
-      .eq('provider', 'gmail')
-      .eq('status', 'connected')
-      .single();
-
-    if (cred?.access_token_encrypted) {
-      effectiveToken = cred.access_token_encrypted.replace(/^enc:/, '');
+    const cred = await getIntegrationCredential(workspaceId, 'gmail');
+    if (cred?.access_token) {
+      effectiveToken = cred.access_token;
+      storedRefreshToken = cred.refresh_token;
     }
   } catch {
     // Non-fatal fallback to env var
@@ -79,20 +116,33 @@ export async function crawlEmailInbox(
     return { source: 'email', inbox, threads_crawled: 0, sops_extracted: 0, status: 'skipped' };
   }
 
-  console.log(`[INFO] [Email Crawler] Sweeping shared inbox threads for: ${inbox}...`);
+  console.log(`[INFO] [Email Crawler] Sweeping shared inbox threads for: ${inbox} (Workspace: ${workspaceId})...`);
 
   let sopsExtracted = 0;
   let threadsCrawled = 0;
 
   try {
-    // Gmail API / MS Graph API message query stub
     const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=label:ops-runbook+OR+subject:incident&maxResults=20`;
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       headers: {
-        'Authorization': `Bearer ${GMAIL_TOKEN}`,
+        'Authorization': `Bearer ${effectiveToken}`,
         'Accept': 'application/json',
       },
     });
+
+    // Handle token expiration (HTTP 401) with automatic token refresh (Gap N)
+    if (response.status === 401 && storedRefreshToken) {
+      const refreshedToken = await refreshGmailAccessToken(workspaceId, storedRefreshToken);
+      if (refreshedToken) {
+        effectiveToken = refreshedToken;
+        response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${effectiveToken}`,
+            'Accept': 'application/json',
+          },
+        });
+      }
+    }
 
     if (!response.ok) {
       console.warn(`[WARN] [Email Crawler] API error (${response.status}): ${await response.text()}`);
@@ -113,11 +163,10 @@ export async function crawlEmailInbox(
 
       threadsCrawled++;
 
-      // Fetch full message details
       let emailTranscript: Array<{ user: string; text: string }> = [];
       try {
         const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgRef.id}`, {
-          headers: { 'Authorization': `Bearer ${GMAIL_TOKEN}` },
+          headers: { 'Authorization': `Bearer ${effectiveToken}` },
         });
 
         if (msgRes.ok) {
@@ -138,9 +187,8 @@ export async function crawlEmailInbox(
 
       if (emailTranscript.length === 0) continue;
 
-      // Extract SOP via LLM
       try {
-        const extractedSOP = await extractSOPFromThread(emailTranscript, workspaceId, 'email');
+        const extractedSOP = await extractSOPFromThread(emailTranscript, workspaceId, 'email', 'crawled');
 
         if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
           const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);

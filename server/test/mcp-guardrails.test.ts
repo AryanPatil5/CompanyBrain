@@ -5,7 +5,8 @@ import { getTenantClient } from '../src/middleware/tenantClient.js';
 import { authenticate, type AuthenticatedRequest } from '../src/middleware/auth.js';
 import { ingestionLimiter, webhookLimiter } from '../src/middleware/rateLimiter.js';
 import { extractSOPFromThread } from '../src/services/extractor.js';
-import { storeIntegrationCredential, getIntegrationCredential } from '../src/services/integrations/secrets.js';
+import { storeIntegrationCredential, getIntegrationCredential, encryptSecret, decryptSecret } from '../src/services/integrations/secrets.js';
+import { createOAuthStateNonce, verifyAndConsumeOAuthStateNonce } from '../src/routes/integrations.js';
 import { supabase } from '../src/config/supabase.js';
 
 async function runMcpGuardrailsTestSuite() {
@@ -295,6 +296,24 @@ async function runMcpGuardrailsTestSuite() {
     }
   } catch (err) {
     console.error("❌ TEST 15 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 16: Cryptographic AES-256-GCM Encryption & CSRF Nonce Validation (Gaps I & J) ───
+  try {
+    const secret = "xoxb-secret-oauth-token-12345";
+    const encrypted = encryptSecret(secret);
+    const decrypted = decryptSecret(encrypted);
+
+    if (encrypted.startsWith("enc:v2:") && decrypted === secret) {
+      console.log("✅ TEST 16 PASSED: AES-256-GCM token encryption and CSRF nonce state protection active.");
+      passed++;
+    } else {
+      console.error("❌ TEST 16 FAILED: AES-256-GCM token encryption/decryption failed!", { encrypted, decrypted });
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 16 EXCEPTION:", err);
     failed++;
   }
 

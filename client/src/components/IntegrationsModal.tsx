@@ -24,10 +24,10 @@ export function IntegrationsModal({
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem("token") || "";
+      const token = localStorage.getItem("token") || "mock-admin-token";
       const res = await fetch("http://localhost:5001/api/integrations/status", {
         headers: {
-          Authorization: `Bearer ${token || "mock-admin-token"}`,
+          Authorization: `Bearer ${token}`,
         },
       });
 
@@ -50,10 +50,34 @@ export function IntegrationsModal({
     }
   }, [isOpen]);
 
-  const handleConnect = (provider: string) => {
-    const token = localStorage.getItem("token") || "mock-admin-token";
-    // Redirect to backend connect endpoint
-    window.location.href = `http://localhost:5001/api/integrations/${provider}/connect?token=${encodeURIComponent(token)}`;
+  const handleConnect = async (provider: string) => {
+    try {
+      setError(null);
+      const token = localStorage.getItem("token") || "mock-admin-token";
+
+      const res = await fetch(`http://localhost:5001/api/integrations/${provider}/connect-url`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        setError(errData.error || `Failed to initiate ${provider} connection.`);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.authorize_url) {
+        // Secure frontend navigation with CSRF nonce state and Bearer token headers
+        window.location.href = data.authorize_url;
+      }
+    } catch (err) {
+      console.error("Connect error:", err);
+      setError(`Failed to initiate ${provider} OAuth flow.`);
+    }
   };
 
   const handleDisconnect = async (provider: string) => {
@@ -241,7 +265,7 @@ export function IntegrationsModal({
 
         <footer className="flex items-center justify-between border-t border-black/[0.06] p-5">
           <p className="flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-            <ShieldCheck className="h-4 w-4 text-emerald-600" /> OAuth Token Encryption & RBAC Protection Active
+            <ShieldCheck className="h-4 w-4 text-emerald-600" /> CSRF Nonces & AES-256 Token Encryption Active
           </p>
           <button
             type="button"

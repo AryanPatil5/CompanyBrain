@@ -1,18 +1,72 @@
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { supabase } from '../../config/supabase.js';
 
 dotenv.config();
 
+const ENCRYPTION_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VAULT_SECRET_KEY || 'default-company-brain-secret-key-32b';
+const ALGORITHM = 'aes-256-gcm';
+
+function getEncryptionKey(): Buffer {
+  return crypto.createHash('sha256').update(ENCRYPTION_SECRET).digest();
+}
+
+/**
+ * Encrypts sensitive OAuth token string using AES-256-GCM
+ */
+export function encryptSecret(plaintext: string): string {
+  if (!plaintext) return '';
+  const iv = crypto.randomBytes(12);
+  const key = getEncryptionKey();
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+
+  let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+
+  return `enc:v2:${iv.toString('hex')}:${authTag}:${encrypted}`;
+}
+
+/**
+ * Decrypts AES-256-GCM encrypted token string
+ */
+export function decryptSecret(cipherText: string): string | null {
+  if (!cipherText) return null;
+  if (!cipherText.startsWith('enc:v2:')) {
+    // Fallback for v1 legacy mock strings
+    return cipherText.replace(/^enc:/, '');
+  }
+
+  try {
+    const parts = cipherText.split(':');
+    if (parts.length !== 5) return null;
+
+    const iv = Buffer.from(parts[2], 'hex');
+    const authTag = Buffer.from(parts[3], 'hex');
+    const encryptedText = parts[4];
+    const key = getEncryptionKey();
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(authTag);
+
+    let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Resolves credential references (e.g., 'vault:stripe_secret_key', 'vault:github_pat')
- * to actual secret keys via process environment variables or Supabase Vault table.
+ * to actual secret keys via process environment variables.
  */
 export async function resolveCredential(credentialRef: string): Promise<string | null> {
   if (!credentialRef) return null;
 
   const key = credentialRef.replace(/^vault:/i, '').toUpperCase();
 
-  // 1. Check environment variables first (e.g., STRIPE_SECRET_KEY, GITHUB_TOKEN, SLACK_BOT_TOKEN)
+  // Check environment variables
   const envVal =
     process.env[key] ||
     process.env[`${key}_KEY`] ||
@@ -23,26 +77,11 @@ export async function resolveCredential(credentialRef: string): Promise<string |
     return envVal;
   }
 
-  // 2. Query Supabase Vault or credential secrets table fallback
-  try {
-    const { data } = await supabase
-      .from('vault_secrets')
-      .select('secret_value')
-      .eq('secret_name', credentialRef)
-      .single();
-
-    if (data?.secret_value) {
-      return data.secret_value;
-    }
-  } catch {
-    // Non-fatal vault lookup fallback
-  }
-
   return null;
 }
 
 /**
- * Stores or updates integration credentials in integration_credentials table
+ * Stores or updates integration credentials in integration_credentials table with AES-256-GCM encryption
  */
 export async function storeIntegrationCredential(params: {
   workspace_id: string;
@@ -62,8 +101,8 @@ export async function storeIntegrationCredential(params: {
         workspace_id,
         provider,
         external_org_id,
-        access_token_encrypted: access_token ? `enc:${access_token}` : null,
-        refresh_token_encrypted: refresh_token ? `enc:${refresh_token}` : null,
+        access_token_encrypted: access_token ? encryptSecret(access_token) : null,
+        refresh_token_encrypted: refresh_token ? encryptSecret(refresh_token) : null,
         scopes: scopes || [],
         connected_by_user_id,
         connected_at: new Date().toISOString(),
@@ -97,8 +136,8 @@ export async function getIntegrationCredential(workspaceId: string, provider: st
 
     if (!data) return null;
 
-    const accessToken = data.access_token_encrypted?.replace(/^enc:/, '') || null;
-    const refreshToken = data.refresh_token_encrypted?.replace(/^enc:/, '') || null;
+    const accessToken = data.access_token_encrypted ? decryptSecret(data.access_token_encrypted) : null;
+    const refreshToken = data.refresh_token_encrypted ? decryptSecret(data.refresh_token_encrypted) : null;
 
     return {
       ...data,

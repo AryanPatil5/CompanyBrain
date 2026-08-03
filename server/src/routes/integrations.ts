@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { supabase } from '../config/supabase.js';
@@ -8,6 +9,49 @@ const router = Router();
 // Base application URLs for OAuth redirects
 const APP_BASE_URL = process.env.APP_BASE_URL || 'http://localhost:5001';
 const CLIENT_BASE_URL = process.env.CLIENT_BASE_URL || 'http://localhost:3000';
+
+// ─── CSRF State Nonce Helpers (Gap I) ──────────────────────────────────
+
+export async function createOAuthStateNonce(workspaceId: string, provider: string): Promise<string> {
+  const nonce = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes TTL
+
+  await supabase.from('oauth_state_nonces').insert({
+    nonce,
+    workspace_id: workspaceId,
+    provider,
+    expires_at: expiresAt,
+  });
+
+  return nonce;
+}
+
+export async function verifyAndConsumeOAuthStateNonce(nonce: string, provider: string): Promise<string | null> {
+  if (!nonce) return null;
+
+  try {
+    const { data } = await supabase
+      .from('oauth_state_nonces')
+      .select('workspace_id, expires_at')
+      .eq('nonce', nonce)
+      .eq('provider', provider)
+      .single();
+
+    if (!data) return null;
+
+    // Check expiration
+    if (new Date(data.expires_at).getTime() < Date.now()) {
+      await supabase.from('oauth_state_nonces').delete().eq('nonce', nonce);
+      return null;
+    }
+
+    // Atomic single-use consumption
+    await supabase.from('oauth_state_nonces').delete().eq('nonce', nonce);
+    return data.workspace_id;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Stage 4: Live Connection Status & Disconnect ──────────────────────
 
@@ -67,7 +111,6 @@ router.post('/:provider/disconnect', authenticate, requireRole(['admin']), async
     const user = (req as AuthenticatedRequest).user!;
     const { provider } = req.params;
 
-    // Delete credentials & installations for provider and workspace
     await supabase.from('integration_credentials').delete().eq('workspace_id', user.workspace_id).eq('provider', provider);
     await supabase.from('integration_installations').delete().eq('workspace_id', user.workspace_id).eq('provider', provider);
 
@@ -77,36 +120,69 @@ router.post('/:provider/disconnect', authenticate, requireRole(['admin']), async
   }
 });
 
-// ─── Stage 1: Slack OAuth Flow ──────────────────────────────────────────
+// ─── Gap L & I: Secure POST /connect-url Authorization Endpoint ────────
 
-router.get('/slack/connect', authenticate, requireRole(['admin']), (req: Request, res: Response): void => {
-  const user = (req as AuthenticatedRequest).user!;
-  const state = encodeURIComponent(JSON.stringify({ workspace_id: user.workspace_id }));
-  const clientId = process.env.SLACK_CLIENT_ID || 'mock-slack-client-id';
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    scope: 'channels:history,channels:read,chat:write',
-    redirect_uri: `${APP_BASE_URL}/api/integrations/slack/callback`,
-    state,
-  });
-
-  res.redirect(`https://slack.com/oauth/v2/authorize?${params.toString()}`);
-});
-
-router.get('/slack/callback', async (req: Request, res: Response): Promise<void> => {
+router.post('/:provider/connect-url', authenticate, requireRole(['admin']), async (req: Request, res: Response): Promise<void> => {
   try {
-    const { code, state } = req.query as { code: string; state: string };
-    if (!state) {
-      res.redirect(`${CLIENT_BASE_URL}?error=slack_missing_state`);
+    const user = (req as AuthenticatedRequest).user!;
+    const { provider } = req.params;
+
+    if (provider !== 'slack' && provider !== 'github' && provider !== 'gmail') {
+      res.status(400).json({ error: `Unsupported integration provider '${provider}' for OAuth connect.` });
       return;
     }
 
-    const { workspace_id } = JSON.parse(decodeURIComponent(state));
+    const nonce = await createOAuthStateNonce(user.workspace_id, provider);
+    let authorizeUrl = '';
+
+    if (provider === 'slack') {
+      const clientId = process.env.SLACK_CLIENT_ID || 'mock-slack-client-id';
+      const params = new URLSearchParams({
+        client_id: clientId,
+        scope: 'channels:history,channels:read,chat:write',
+        redirect_uri: `${APP_BASE_URL}/api/integrations/slack/callback`,
+        state: nonce,
+      });
+      authorizeUrl = `https://slack.com/oauth/v2/authorize?${params.toString()}`;
+    } else if (provider === 'github') {
+      const appName = process.env.GITHUB_APP_NAME || 'company-brain-app';
+      authorizeUrl = `https://github.com/apps/${appName}/installations/new?state=${nonce}`;
+    } else if (provider === 'gmail') {
+      const clientId = process.env.GOOGLE_CLIENT_ID || 'mock-google-client-id';
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: `${APP_BASE_URL}/api/integrations/gmail/callback`,
+        response_type: 'code',
+        access_type: 'offline',
+        prompt: 'consent',
+        scope: 'https://www.googleapis.com/auth/gmail.readonly',
+        state: nonce,
+      });
+      authorizeUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    }
+
+    res.json({ success: true, authorize_url: authorizeUrl });
+  } catch (err) {
+    console.error('[Connect URL Error]:', err);
+    res.status(500).json({ error: 'Failed to generate authorization URL.' });
+  }
+});
+
+// ─── Stage 1: Slack OAuth Callback ──────────────────────────────────────
+
+router.get('/slack/callback', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { code, state } = req.query as { code?: string; state?: string };
+
+    const workspace_id = await verifyAndConsumeOAuthStateNonce(state || '', 'slack');
+    if (!workspace_id) {
+      res.redirect(`${CLIENT_BASE_URL}?error=slack_invalid_state_nonce`);
+      return;
+    }
+
     const clientId = process.env.SLACK_CLIENT_ID || '';
     const clientSecret = process.env.SLACK_CLIENT_SECRET || '';
 
-    // Mock mode fallback for local dev/testing if OAuth keys are unset
     let teamId = 'T_DEMO_SLACK_ORG';
     let accessToken = 'xoxb-mock-demo-slack-token';
 
@@ -129,6 +205,9 @@ router.get('/slack/callback', async (req: Request, res: Response): Promise<void>
       }
       teamId = data.team?.id || teamId;
       accessToken = data.access_token || accessToken;
+    } else if (process.env.NODE_ENV === 'production') {
+      res.redirect(`${CLIENT_BASE_URL}?error=slack_oauth_not_configured`);
+      return;
     }
 
     await storeIntegrationCredential({
@@ -150,21 +229,24 @@ router.get('/slack/callback', async (req: Request, res: Response): Promise<void>
   }
 });
 
-// ─── Stage 2: GitHub App Installation Flow ───────────────────────────────
-
-router.get('/github/connect', authenticate, requireRole(['admin']), (req: Request, res: Response): void => {
-  const user = (req as AuthenticatedRequest).user!;
-  const state = encodeURIComponent(JSON.stringify({ workspace_id: user.workspace_id }));
-  const appName = process.env.GITHUB_APP_NAME || 'company-brain-app';
-
-  res.redirect(`https://github.com/apps/${appName}/installations/new?state=${state}`);
-});
+// ─── Stage 2: GitHub App Installation Callback ──────────────────────────
 
 router.get('/github/callback', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { installation_id, state } = req.query as { installation_id: string; state: string };
-    const workspace_id = state ? JSON.parse(decodeURIComponent(state)).workspace_id : '00000000-0000-0000-0000-000000000000';
-    const installId = installation_id || 'gh_inst_demo_99';
+    const { installation_id, state } = req.query as { installation_id?: string; state?: string };
+
+    const workspace_id = await verifyAndConsumeOAuthStateNonce(state || '', 'github');
+    if (!workspace_id) {
+      res.redirect(`${CLIENT_BASE_URL}?error=github_invalid_state_nonce`);
+      return;
+    }
+
+    const installId = installation_id || (process.env.NODE_ENV !== 'production' ? 'gh_inst_demo_99' : '');
+
+    if (!installId && process.env.NODE_ENV === 'production') {
+      res.redirect(`${CLIENT_BASE_URL}?error=github_installation_missing`);
+      return;
+    }
 
     await storeIntegrationCredential({
       workspace_id,
@@ -184,35 +266,18 @@ router.get('/github/callback', async (req: Request, res: Response): Promise<void
   }
 });
 
-// ─── Stage 3: Gmail OAuth Flow & Token Exchange ─────────────────────────
-
-router.get('/gmail/connect', authenticate, requireRole(['admin']), (req: Request, res: Response): void => {
-  const user = (req as AuthenticatedRequest).user!;
-  const state = encodeURIComponent(JSON.stringify({ workspace_id: user.workspace_id }));
-  const clientId = process.env.GOOGLE_CLIENT_ID || 'mock-google-client-id';
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: `${APP_BASE_URL}/api/integrations/gmail/callback`,
-    response_type: 'code',
-    access_type: 'offline',
-    prompt: 'consent',
-    scope: 'https://www.googleapis.com/auth/gmail.readonly',
-    state,
-  });
-
-  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
-});
+// ─── Stage 3: Gmail OAuth Callback ─────────────────────────────────────
 
 router.get('/gmail/callback', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { code, state } = req.query as { code: string; state: string };
-    if (!state) {
-      res.redirect(`${CLIENT_BASE_URL}?error=gmail_missing_state`);
+    const { code, state } = req.query as { code?: string; state?: string };
+
+    const workspace_id = await verifyAndConsumeOAuthStateNonce(state || '', 'gmail');
+    if (!workspace_id) {
+      res.redirect(`${CLIENT_BASE_URL}?error=gmail_invalid_state_nonce`);
       return;
     }
 
-    const { workspace_id } = JSON.parse(decodeURIComponent(state));
     const clientId = process.env.GOOGLE_CLIENT_ID || '';
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
 
@@ -232,8 +297,17 @@ router.get('/gmail/callback', async (req: Request, res: Response): Promise<void>
         }),
       });
       const tokens = await tokenRes.json();
+
+      if (tokens.error) {
+        res.redirect(`${CLIENT_BASE_URL}?error=gmail_oauth_failed`);
+        return;
+      }
+
       accessToken = tokens.access_token || accessToken;
       refreshToken = tokens.refresh_token || refreshToken;
+    } else if (process.env.NODE_ENV === 'production') {
+      res.redirect(`${CLIENT_BASE_URL}?error=gmail_oauth_not_configured`);
+      return;
     }
 
     await storeIntegrationCredential({

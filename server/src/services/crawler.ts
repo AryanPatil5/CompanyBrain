@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { supabase } from '../config/supabase.js';
 import { crawlSlackHistory, isSOPCandidateSlackThread, processSlackThreadCandidates, type SlackThread } from './crawlers/slack.js';
 import { crawlGithubPostMortems } from './crawlers/github.js';
 import { crawlLinearIncidents } from './crawlers/linear.js';
@@ -21,20 +22,11 @@ export {
   type SlackThread,
 };
 
-/**
- * Background Crawler Worker Service
- * 
- * Periodically polls historical team communications across Slack channels,
- * GitHub post-mortem issues/PRs, Linear incident tickets, Zendesk tickets, Email shared inboxes,
- * and Database query logs to pull tacit knowledge into Company Brain SOP drafts.
- * Also performs recurring staleness sweeps via markStaleSOPs().
- */
-
 let crawlerTimer: NodeJS.Timeout | null = null;
 const CRAWL_INTERVAL_MS = parseInt(process.env.CRAWL_INTERVAL_MS || '3600000', 10); // Default: every 1 hour (3600000ms)
 
 /**
- * Executes a single complete crawler cycle across all 6 active historical sources & staleness sweep.
+ * Executes a single complete crawler cycle across all active historical sources per workspace & staleness sweep.
  */
 export async function runCrawlCycle(): Promise<void> {
   console.log('[INFO] [Crawler Worker] Running background historical knowledge crawl cycle across Slack, GitHub, Linear, Zendesk, Email & Database...');
@@ -43,8 +35,27 @@ export async function runCrawlCycle(): Promise<void> {
     const githubRes = await crawlGithubPostMortems();
     const linearRes = await crawlLinearIncidents();
     const zendeskRes = await crawlZendeskTickets();
-    const emailRes = await crawlEmailInbox();
     const dbRes = await crawlDatabaseLogs();
+
+    // Query all connected workspace IDs for Gmail crawling (Gap M)
+    const { data: credentials } = await supabase
+      .from('integration_credentials')
+      .select('workspace_id')
+      .eq('provider', 'gmail')
+      .eq('status', 'connected');
+
+    const targetWorkspaces = credentials && credentials.length > 0
+      ? Array.from(new Set(credentials.map((c) => c.workspace_id)))
+      : ['00000000-0000-0000-0000-000000000000'];
+
+    let totalEmailCrawled = 0;
+    let totalEmailSOPs = 0;
+
+    for (const wsId of targetWorkspaces) {
+      const emailRes = await crawlEmailInbox(process.env.OPS_INBOX_EMAIL || 'ops-support@company.com', wsId);
+      totalEmailCrawled += emailRes.threads_crawled;
+      totalEmailSOPs += emailRes.sops_extracted;
+    }
 
     // Perform background knowledge freshness & staleness sweep (30-day threshold)
     const staleCount = await markStaleSOPs(30);
@@ -54,7 +65,7 @@ export async function runCrawlCycle(): Promise<void> {
       github: githubRes.status,
       linear: linearRes.status,
       zendesk: zendeskRes.status,
-      email: emailRes.status,
+      email: { crawled: totalEmailCrawled, sops: totalEmailSOPs },
       database: dbRes.status,
       stale_sops_marked: staleCount,
     });
@@ -70,10 +81,8 @@ export function startCrawlerWorker(): void {
   if (crawlerTimer) return;
   console.log(`[INFO] [Crawler Worker] Initializing active crawler worker (Recurring interval: ${CRAWL_INTERVAL_MS}ms)...`);
 
-  // Run initial crawl cycle asynchronously on startup
   void runCrawlCycle();
 
-  // Schedule recurring polling loop
   crawlerTimer = setInterval(() => {
     void runCrawlCycle();
   }, CRAWL_INTERVAL_MS);
