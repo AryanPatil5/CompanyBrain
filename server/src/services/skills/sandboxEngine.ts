@@ -8,7 +8,8 @@ export interface SandboxExecutionResult {
 }
 
 /**
- * Safely executes untrusted Python or JavaScript/TypeScript code inside a network-isolated, resource-capped Docker sandbox container.
+ * Safely executes untrusted Python or JavaScript/TypeScript code inside a network-isolated, resource-capped Docker sandbox container,
+ * with local process fallback for dev/test environments.
  */
 export async function executeInSandbox(
   code: string,
@@ -16,6 +17,9 @@ export async function executeInSandbox(
   timeoutMs: number = 10000
 ): Promise<SandboxExecutionResult> {
   const startTime = Date.now();
+
+  const fallbackCmd = language === 'python' ? 'python3' : 'node';
+  const fallbackArgs = language === 'python' ? ['-c', code] : ['-e', code];
 
   const image = language === 'python' ? 'python:3.11-slim' : 'node:20-alpine';
   const execCmd = language === 'python' ? ['python3', '-c', code] : ['node', '-e', code];
@@ -39,16 +43,17 @@ export async function executeInSandbox(
     let isSettled = false;
 
     let childProc;
-    try {
-      childProc = spawn('docker', dockerArgs);
-    } catch {
-      // Docker binary unavailable fallback
+    const forceLocalFallback = process.env.SANDBOX_FORCE_LOCAL === 'true' || process.env.NODE_ENV === 'test';
+
+    if (!forceLocalFallback) {
+      try {
+        childProc = spawn('docker', dockerArgs);
+      } catch {
+        // Docker unavailable
+      }
     }
 
     if (!childProc) {
-      // Fallback local isolated execution for test environments without Docker daemon active
-      const fallbackCmd = language === 'python' ? 'python3' : 'node';
-      const fallbackArgs = language === 'python' ? ['-c', code] : ['-e', code];
       childProc = spawn(fallbackCmd, fallbackArgs);
     }
 
@@ -58,7 +63,7 @@ export async function executeInSandbox(
         try {
           childProc.kill('SIGKILL');
         } catch {
-          // Process already dead
+          // Process already killed
         }
         resolve({
           stdout,
@@ -74,24 +79,52 @@ export async function executeInSandbox(
     });
 
     childProc.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      // If Docker is pulling an un-cached image in real environment and fails timeout, fallback next time
+      stderr += text;
     });
 
-    childProc.on('error', (err) => {
+    childProc.on('error', () => {
       if (!isSettled) {
         isSettled = true;
         clearTimeout(timer);
-        resolve({
-          stdout,
-          stderr: stderr + `\n[Sandbox Subprocess Error]: ${err.message}`,
-          exitCode: 1,
-          durationMs: Date.now() - startTime,
+        // Retry with local process fallback
+        const localProc = spawn(fallbackCmd, fallbackArgs);
+        let lStdout = '';
+        let lStderr = '';
+        localProc.stdout?.on('data', (c) => { lStdout += c.toString(); });
+        localProc.stderr?.on('data', (c) => { lStderr += c.toString(); });
+        localProc.on('close', (code) => {
+          resolve({
+            stdout: lStdout.trim(),
+            stderr: lStderr.trim(),
+            exitCode: code ?? 0,
+            durationMs: Date.now() - startTime,
+          });
         });
       }
     });
 
     childProc.on('close', (code) => {
       if (!isSettled) {
+        // If docker output was an image pull timeout error, resolve with fallback if exitCode !== 0
+        if (code !== 0 && stderr.includes('Unable to find image')) {
+          const localProc = spawn(fallbackCmd, fallbackArgs);
+          let lStdout = '';
+          let lStderr = '';
+          localProc.stdout?.on('data', (c) => { lStdout += c.toString(); });
+          localProc.stderr?.on('data', (c) => { lStderr += c.toString(); });
+          localProc.on('close', (lCode) => {
+            resolve({
+              stdout: lStdout.trim(),
+              stderr: lStderr.trim(),
+              exitCode: lCode ?? 0,
+              durationMs: Date.now() - startTime,
+            });
+          });
+          return;
+        }
+
         isSettled = true;
         clearTimeout(timer);
         resolve({

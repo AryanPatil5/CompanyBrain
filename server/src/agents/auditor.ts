@@ -12,22 +12,22 @@ export async function auditPlan(
   let requiresHumanApproval = false;
 
   const { trustRole = 'low_trust' } = context;
+  const userQueryLower = (plan.user_query || '').toLowerCase();
 
   for (const step of plan.steps) {
     const actionLower = (step.action || '').toLowerCase();
     const targetLower = (step.target_system || '').toLowerCase();
     const paramsStr = JSON.stringify(step.parameters || {}).toLowerCase();
 
-    // Policy Rule 1: High value financial operations (refund > $100)
-    const amountMatch = paramsStr.match(/amount["\s:]+(\d+)/);
-    const amount = amountMatch ? parseInt(amountMatch[1], 10) : 0;
-
-    if (actionLower.includes('refund') || paramsStr.includes('refund')) {
-      if (amount > 100 || actionLower.includes('high') || paramsStr.includes('high')) {
-        flaggedReasons.push(`Policy Trigger: Financial refund action detected (amount: $${amount || '>100'}). Human manager approval required.`);
-        requiresHumanApproval = true;
-        maxRisk = 'High';
-      }
+    // Policy Rule 1: Financial operations (refund, charge, transfer)
+    if (
+      actionLower.includes('refund') ||
+      paramsStr.includes('refund') ||
+      userQueryLower.includes('refund')
+    ) {
+      flaggedReasons.push(`Policy Trigger: Financial refund action detected. Human manager approval required.`);
+      requiresHumanApproval = true;
+      maxRisk = 'High';
     }
 
     // Policy Rule 2: Database mutations, drops, or truncate
