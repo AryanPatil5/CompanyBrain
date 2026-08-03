@@ -533,6 +533,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 30: Workflow State Machine Governor (Deterministic Transitions) ───
+  try {
+    const { runStateMachineTest } = await import('./agents/stateMachine.test.js');
+    const stateSuccess = await runStateMachineTest();
+    if (stateSuccess) {
+      console.log("✅ TEST 30 PASSED: Workflow State Machine Governor enforced allowed lifecycle state transitions and blocked illegal transitions.");
+      passed++;
+    } else {
+      console.error("❌ TEST 30 FAILED: State Machine Governor test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 30 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
