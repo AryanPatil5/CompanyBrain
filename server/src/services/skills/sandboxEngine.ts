@@ -43,7 +43,7 @@ export async function executeInSandbox(
     let isSettled = false;
 
     let childProc;
-    const forceLocalFallback = process.env.SANDBOX_FORCE_LOCAL === 'true' || process.env.NODE_ENV === 'test';
+    const forceLocalFallback = process.env.SANDBOX_FORCE_LOCAL === 'true';
 
     if (!forceLocalFallback) {
       try {
@@ -65,6 +65,25 @@ export async function executeInSandbox(
         } catch {
           // Process already killed
         }
+
+        // If Docker process timed out due to slow image pulling, fallback to local execution
+        if (stderr.includes('Unable to find image') || stderr.includes('Pulling')) {
+          const localProc = spawn(fallbackCmd, fallbackArgs);
+          let lStdout = '';
+          let lStderr = '';
+          localProc.stdout?.on('data', (c) => { lStdout += c.toString(); });
+          localProc.stderr?.on('data', (c) => { lStderr += c.toString(); });
+          localProc.on('close', (code) => {
+            resolve({
+              stdout: lStdout.trim(),
+              stderr: lStderr.trim(),
+              exitCode: code ?? 0,
+              durationMs: Date.now() - startTime,
+            });
+          });
+          return;
+        }
+
         resolve({
           stdout,
           stderr: stderr + `\n[Sandbox Error]: Execution timed out after ${timeoutMs}ms.`,
@@ -79,16 +98,13 @@ export async function executeInSandbox(
     });
 
     childProc.stderr?.on('data', (chunk) => {
-      const text = chunk.toString();
-      // If Docker is pulling an un-cached image in real environment and fails timeout, fallback next time
-      stderr += text;
+      stderr += chunk.toString();
     });
 
     childProc.on('error', () => {
       if (!isSettled) {
         isSettled = true;
         clearTimeout(timer);
-        // Retry with local process fallback
         const localProc = spawn(fallbackCmd, fallbackArgs);
         let lStdout = '';
         let lStderr = '';
@@ -107,8 +123,9 @@ export async function executeInSandbox(
 
     childProc.on('close', (code) => {
       if (!isSettled) {
-        // If docker output was an image pull timeout error, resolve with fallback if exitCode !== 0
-        if (code !== 0 && stderr.includes('Unable to find image')) {
+        if (code !== 0 && (stderr.includes('Unable to find image') || stderr.includes('Pulling'))) {
+          isSettled = true;
+          clearTimeout(timer);
           const localProc = spawn(fallbackCmd, fallbackArgs);
           let lStdout = '';
           let lStderr = '';
