@@ -34,6 +34,7 @@ export function IntegrationsModal({
       const res = await fetch(`${API_BASE_URL}/api/integrations/status`, {
         headers: {
           Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
         },
       });
 
@@ -66,6 +67,7 @@ export function IntegrationsModal({
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
         },
       });
 
@@ -93,6 +95,7 @@ export function IntegrationsModal({
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
         },
       });
 

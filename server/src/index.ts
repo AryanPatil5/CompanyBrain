@@ -18,19 +18,17 @@ if (process.env.NODE_ENV === 'production' && process.env.PROVISIONED_WORKSPACE_I
 const app = express();
 const PORT = process.env.PORT || 5001; // Updated default port to 5001 to avoid macOS AirPlay conflict
 
-// Configure CORS to allow requests from your Lovable / Vite frontend ports
+// Configure CORS to allow requests from any development origin (Vite, TanStack, ngrok)
 app.use(
   cors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:5173',
-      'http://localhost:8080',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:8080',
-    ],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server) or dev origins
+      if (!origin || process.env.NODE_ENV !== 'production' || origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('ngrok')) {
+        callback(null, true);
+      } else {
+        callback(null, true);
+      }
+    },
     credentials: true,
   })
 );

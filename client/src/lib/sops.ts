@@ -1,3 +1,7 @@
+import { API_BASE_URL } from "./api-config";
+
+export const SOP_CATEGORIES = ["All", "Database", "Infrastructure", "Security", "Billing", "Engineering", "General"] as const;
+
 export type SopStatus = "draft" | "approved";
 export type RiskLevel = "Low" | "Medium" | "High" | "Critical";
 
@@ -24,87 +28,88 @@ export interface Sop {
   requiresHumanGate: boolean;
 }
 
-export interface PendingApproval {
-  id: string;
-  sop_id: string;
-  agent_id: string;
-  requested_by: string;
-  risk_level: RiskLevel;
-  status: "pending" | "approved" | "rejected";
-  reason: string;
-  created_at: string;
-  skills_sops?: {
-    title: string;
-    category: string;
-    trigger_condition: string;
-  };
-}
-
-export interface Analytics {
-  total_sops: number;
-  by_status: Record<string, number>;
-  by_category: Record<string, number>;
-  by_risk: Record<string, number>;
-  stale_count: number;
-  pending_approvals_count: number;
-  recent_executions: number;
-  sources_ingested: Record<string, number>;
-}
-
 export interface SopVersion {
   id: string;
+  sop_id: string;
   version_number: number;
   changed_by: string;
   change_reason: string;
   created_at: string;
 }
 
-export const SOP_CATEGORIES = [
-  "All",
-  "Engineering",
-  "Support",
-  "Billing",
-  "Operations",
-  "Security",
-] as const;
+export interface PendingApproval {
+  id: string;
+  sop_id: string;
+  step_index: number;
+  target_system: string;
+  requested_by: string;
+  parameters: Record<string, any>;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  sop_title?: string;
+}
 
+export interface Analytics {
+  total_sops: number;
+  stale_sops: number;
+  executions_today: number;
+  failed_ingestions: number;
+}
+
+// Fallback mock SOPs used only if backend is completely unreachable
 export const MOCK_SOPS: Sop[] = [
   {
-    id: "sop-vip-rate-limit",
-    title: "Enterprise VIP Rate Limit Override Protocol",
-    category: "Engineering",
-    status: "draft",
-    trigger: "customer.tier == 'enterprise' AND api_429_count > 25 within 10m",
-    summary:
-      "Temporarily elevates API quota for enterprise tenants experiencing throttling during peak load windows.",
+    id: "sop_01",
+    title: "Primary DB Slow Query Triage",
+    category: "Database",
+    status: "approved",
+    trigger: "P99 DB latency > 500ms for 3 consecutive minutes",
+    summary: "Identifies blocking queries, cancels orphaned transactions, and scales read-replicas if CPU exceeds 90%.",
     steps: [
-      {
-        instruction:
-          "Confirm the tenant's contract tier and current burst allowance in the accounts table.",
-        target: "Postgres",
-      },
-      {
-        instruction:
-          "Raise the tenant rate-limit bucket to 3x baseline with a 4 hour expiry token.",
-        target: "Admin CLI",
-      },
-      {
-        instruction:
-          "Annotate the subscription record so overage is not auto-billed for the override window.",
-        target: "Stripe",
-      },
-      {
-        instruction:
-          "Post an override summary to #enterprise-ops and open a follow-up capacity ticket.",
-        target: "Slack",
-      },
+      { instruction: "Check active long-running queries via pg_stat_activity", target: "PostgreSQL Primary" },
+      { instruction: "Terminate queries executing for > 300s without lock", target: "PostgreSQL Primary" },
+      { instruction: "Notify #ops-db-alerts with terminated PID details", target: "Slack" }
     ],
-    version: 1,
-    lastConfirmedAt: new Date().toISOString(),
+    version: 3,
+    lastConfirmedAt: "2026-03-28",
     isStale: false,
     riskLevel: "High",
     requiresHumanGate: true,
   },
+  {
+    id: "sop_02",
+    title: "Staging Redis Cache Flush & Warmup",
+    category: "Infrastructure",
+    status: "approved",
+    trigger: "Staging cache inconsistency error rate > 5%",
+    summary: "Flushes key pattern 'session:*' and triggers the background catalog warmup job.",
+    steps: [
+      { instruction: "Flush matching key pattern in staging Redis node", target: "Redis Staging" },
+      { instruction: "Invoke /api/admin/warmup-cache endpoint", target: "Internal API" }
+    ],
+    version: 1,
+    lastConfirmedAt: "2026-02-15",
+    isStale: true,
+    riskLevel: "Medium",
+    requiresHumanGate: false,
+  },
+  {
+    id: "sop_03",
+    title: "Emergency Tenant Rate Limit Elevation",
+    category: "Security",
+    status: "draft",
+    trigger: "DDoS heuristic flag or HTTP 429 spike > 10,000 req/min",
+    summary: "Elevates Cloudflare WAF rate-limiting tier to strict mode for affected workspace.",
+    steps: [
+      { instruction: "Apply high-security rate-limit rule to tenant zone", target: "Cloudflare WAF" },
+      { instruction: "Issue temporary API token with reduced quota", target: "Auth Service" }
+    ],
+    version: 2,
+    lastConfirmedAt: "2026-03-20",
+    isStale: false,
+    riskLevel: "Critical",
+    requiresHumanGate: true,
+  }
 ];
 
 export function getToken(): string {
@@ -143,7 +148,10 @@ export async function fetchSops(): Promise<{ sops: Sop[]; live: boolean }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(`${API_BASE_URL}/api/sops`, {
-      headers: { "Authorization": `Bearer ${getToken()}` },
+      headers: {
+        "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
+      },
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -172,6 +180,7 @@ export async function approveSopApi(id: string): Promise<boolean> {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
       },
       body: JSON.stringify({ status: "Approved" }),
     });
@@ -186,7 +195,10 @@ export async function confirmSopApi(id: string): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/sops/${id}/confirm`, {
       method: "POST",
-      headers: { "Authorization": `Bearer ${getToken()}` },
+      headers: {
+        "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
+      },
     });
     return res.ok;
   } catch (err) {
@@ -200,7 +212,10 @@ export async function fetchAnalytics(): Promise<Analytics | null> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(`${API_BASE_URL}/api/sops/analytics`, {
-      headers: { "Authorization": `Bearer ${getToken()}` },
+      headers: {
+        "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
+      },
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -215,7 +230,10 @@ export async function fetchAnalytics(): Promise<Analytics | null> {
 export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/sops/${sopId}/versions`, {
-      headers: { "Authorization": `Bearer ${getToken()}` },
+      headers: {
+        "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
+      },
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -228,7 +246,10 @@ export async function fetchVersions(sopId: string): Promise<SopVersion[]> {
 export async function fetchPendingApprovals(): Promise<PendingApproval[]> {
   try {
     const res = await fetch(`${API_BASE_URL}/api/sops/approvals`, {
-      headers: { "Authorization": `Bearer ${getToken()}` },
+      headers: {
+        "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
+      },
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -245,6 +266,7 @@ export async function resolveApprovalApi(approvalId: string, status: "approved" 
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
       },
       body: JSON.stringify({ status }),
     });
@@ -267,6 +289,7 @@ export async function teachBrainApi(payload: {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
       },
       body: JSON.stringify({
         ...payload,
@@ -292,6 +315,7 @@ export async function elicitSopQuestionsApi(sopDraft: Partial<Sop>): Promise<Eli
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${getToken()}`,
+        "ngrok-skip-browser-warning": "true",
       },
       body: JSON.stringify({ sop: sopDraft }),
     });
@@ -308,14 +332,13 @@ export async function elicitSopQuestionsApi(sopDraft: Partial<Sop>): Promise<Eli
 
     return {
       success: true,
-      questions: Array.isArray(data.questions) ? data.questions : [],
+      questions: data.questions || [],
     };
   } catch (err) {
-    console.error("Elicit SOP questions error:", err);
     return {
       success: false,
       questions: [],
-      error: "Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually.",
+      error: "Network error connecting to backend API.",
     };
   }
 }
