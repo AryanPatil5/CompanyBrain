@@ -581,6 +581,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 33: Dynamic OpenAPI 3.0 / Swagger Skill Compiler ───
+  try {
+    const { runOpenApiCompilerTest } = await import('./skills/openApiCompiler.test.js');
+    const compilerSuccess = await runOpenApiCompilerTest();
+    if (compilerSuccess) {
+      console.log("✅ TEST 33 PASSED: OpenAPI Skill Compiler parsed paths, operations, parameters, and requestBody into type-safe FastMCP skill definitions.");
+      passed++;
+    } else {
+      console.error("❌ TEST 33 FAILED: OpenAPI compiler test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 33 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
