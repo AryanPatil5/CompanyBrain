@@ -517,6 +517,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 29: Redis-Backed Agent Persistent Store & Workflow Recovery ───
+  try {
+    const { runPersistentStoreTest } = await import('./agents/persistentStore.test.js');
+    const storeSuccess = await runPersistentStoreTest();
+    if (storeSuccess) {
+      console.log("✅ TEST 29 PASSED: Agent Persistent Store saved, retrieved, and updated multi-agent workflow DAG states.");
+      passed++;
+    } else {
+      console.error("❌ TEST 29 FAILED: Agent Persistent Store test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 29 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
