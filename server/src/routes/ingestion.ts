@@ -16,14 +16,20 @@ import { verifySlackSignature, verifyGitHubSignature, verifyLinearSignature, res
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { generateEmbedding } from '../services/embeddings.js';
 import { getTenantClient } from '../middleware/tenantClient.js';
+import { ingestionLimiter, webhookLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
-async function processThread(payload: ThreadPayload, res: Response, req?: Request): Promise<void> {
+async function processThread(
+  payload: ThreadPayload,
+  res: Response,
+  req?: Request,
+  sourceTrust: 'manual' | 'crawled' = 'crawled'
+): Promise<void> {
   const { workspace_id, source, external_thread_id, channel_or_project, messages } = payload;
   const client = req ? getTenantClient(req) : supabase;
 
-  console.log(`[Ingestion] Received ${source} webhook for thread/source: ${external_thread_id}`);
+  console.log(`[Ingestion] Received ${source} webhook (trust: ${sourceTrust}) for thread/source: ${external_thread_id}`);
 
   // Store raw thread
   const { data: rawThread, error: rawErr } = await client
@@ -45,10 +51,10 @@ async function processThread(payload: ThreadPayload, res: Response, req?: Reques
     return;
   }
 
-  // Extract SOP via LLM with error handling for schema validation failures
+  // Extract SOP via LLM with error handling and sourceTrust parameter
   let extractedSOP;
   try {
-    extractedSOP = await extractSOPFromThread(messages, workspace_id, source);
+    extractedSOP = await extractSOPFromThread(messages, workspace_id, source, sourceTrust);
   } catch (extractErr) {
     res.status(422).json({
       success: false,
@@ -167,7 +173,9 @@ async function processThread(payload: ThreadPayload, res: Response, req?: Reques
 
 // ─── Webhook Routes ──────────────────────────────────────────
 
-router.post('/webhook', verifySlackSignature, async (req: Request, res: Response): Promise<void> => {
+// ─── Webhook Routes ──────────────────────────────────────────
+
+router.post('/webhook', webhookLimiter, verifySlackSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const externalOrgId = req.body.team_id || req.body.team?.id;
     if (!externalOrgId) {
@@ -189,14 +197,14 @@ router.post('/webhook', verifySlackSignature, async (req: Request, res: Response
       res.status(400).json({ error: 'Missing required payload parameters or invalid messages format.' });
       return;
     }
-    await processThread(payload, res);
+    await processThread(payload, res, req, 'crawled');
   } catch (error) {
     console.error('[Ingestion Error]:', error);
     res.status(500).json({ error: 'Internal server error during ingestion.' });
   }
 });
 
-router.post('/webhook/github', verifyGitHubSignature, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/github', webhookLimiter, verifyGitHubSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const externalOrgId = req.body.installation?.id || req.body.repository?.owner?.id || req.body.org;
     if (!externalOrgId) {
@@ -217,13 +225,13 @@ router.post('/webhook/github', verifyGitHubSignature, async (req: Request, res: 
       res.status(400).json({ error: 'Invalid GitHub payload.' });
       return;
     }
-    await processThread(payload, res);
+    await processThread(payload, res, req, 'crawled');
   } catch (error) {
     res.status(500).json({ error: 'Internal server error during GitHub ingestion.' });
   }
 });
 
-router.post('/webhook/linear', verifyLinearSignature, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/linear', webhookLimiter, verifyLinearSignature, async (req: Request, res: Response): Promise<void> => {
   try {
     const externalOrgId = req.body.organizationId || req.body.org_id;
     if (!externalOrgId) {
@@ -244,13 +252,13 @@ router.post('/webhook/linear', verifyLinearSignature, async (req: Request, res: 
       res.status(400).json({ error: 'Invalid Linear payload.' });
       return;
     }
-    await processThread(payload, res);
+    await processThread(payload, res, req, 'crawled');
   } catch (error) {
     res.status(500).json({ error: 'Internal server error during Linear ingestion.' });
   }
 });
 
-router.post('/webhook/zendesk', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/zendesk', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeZendesk({
@@ -261,13 +269,13 @@ router.post('/webhook/zendesk', authenticate, async (req: Request, res: Response
       res.status(400).json({ error: 'Invalid Zendesk support payload.' });
       return;
     }
-    await processThread(payload, res);
+    await processThread(payload, res, req, 'crawled');
   } catch (error) {
     res.status(500).json({ error: 'Internal server error during Zendesk ingestion.' });
   }
 });
 
-router.post('/webhook/email', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/email', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeEmail({
@@ -278,13 +286,13 @@ router.post('/webhook/email', authenticate, async (req: Request, res: Response):
       res.status(400).json({ error: 'Invalid email payload.' });
       return;
     }
-    await processThread(payload, res);
+    await processThread(payload, res, req, 'crawled');
   } catch (error) {
     res.status(500).json({ error: 'Internal server error during Email ingestion.' });
   }
 });
 
-router.post('/webhook/database', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/database', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeDatabase({
@@ -295,13 +303,13 @@ router.post('/webhook/database', authenticate, async (req: Request, res: Respons
       res.status(400).json({ error: 'Invalid database runbook payload.' });
       return;
     }
-    await processThread(payload, res);
+    await processThread(payload, res, req, 'crawled');
   } catch (error) {
     res.status(500).json({ error: 'Internal server error during Database ingestion.' });
   }
 });
 
-router.post('/webhook/teach', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/webhook/teach', ingestionLimiter, authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
     const payload = normalizeDirectTeach({
@@ -312,7 +320,7 @@ router.post('/webhook/teach', authenticate, async (req: Request, res: Response):
       res.status(400).json({ error: 'Invalid tacit knowledge payload. Ensure title and description are provided.' });
       return;
     }
-    await processThread(payload, res);
+    await processThread(payload, res, req, 'manual');
   } catch (error) {
     console.error('[Direct Teach Ingestion Error]:', error);
     res.status(500).json({ error: 'Internal server error during Tacit Knowledge ingestion.' });
