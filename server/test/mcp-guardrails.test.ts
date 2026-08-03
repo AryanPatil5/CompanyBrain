@@ -597,6 +597,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 34: Network-Isolated Docker Sandbox Code Execution Engine ───
+  try {
+    const { runSandboxEngineTest } = await import('./skills/sandboxEngine.test.js');
+    const sandboxSuccess = await runSandboxEngineTest();
+    if (sandboxSuccess) {
+      console.log("✅ TEST 34 PASSED: Docker Sandbox Engine executed Python/JS code in isolated containers with CPU/memory limits, stdout capture, and timeout killing.");
+      passed++;
+    } else {
+      console.error("❌ TEST 34 FAILED: Sandbox Engine test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 34 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
