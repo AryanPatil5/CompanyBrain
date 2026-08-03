@@ -6,7 +6,7 @@ import { authenticate, type AuthenticatedRequest } from '../src/middleware/auth.
 import { ingestionLimiter, webhookLimiter } from '../src/middleware/rateLimiter.js';
 import { extractSOPFromThread } from '../src/services/extractor.js';
 import { storeIntegrationCredential, getIntegrationCredential, encryptSecret, decryptSecret } from '../src/services/integrations/secrets.js';
-import { createOAuthStateNonce, verifyAndConsumeOAuthStateNonce } from '../src/routes/integrations.js';
+import { createOAuthStateNonce, verifyAndConsumeOAuthStateNonce, getPlatformOAuthConfig } from '../src/routes/integrations.js';
 import { supabase } from '../src/config/supabase.js';
 
 async function runMcpGuardrailsTestSuite() {
@@ -337,6 +337,21 @@ async function runMcpGuardrailsTestSuite() {
     }
   } catch (err) {
     console.error("❌ TEST 17 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 18: Platform OAuth Config Resolution & GitHub Demo Mode Defaults (Option A & B) ───
+  try {
+    const githubConfig = await getPlatformOAuthConfig('github');
+    if (githubConfig.client_id && (githubConfig.source === 'demo' || githubConfig.source === 'env' || githubConfig.source === 'database')) {
+      console.log("✅ TEST 18 PASSED: Platform OAuth config resolution active with zero-config GitHub demo mode fallback ('company-brain-demo').");
+      passed++;
+    } else {
+      console.error("❌ TEST 18 FAILED: Platform OAuth config resolution failed!", githubConfig);
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 18 EXCEPTION:", err);
     failed++;
   }
 

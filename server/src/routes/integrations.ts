@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { supabase } from '../config/supabase.js';
-import { storeIntegrationCredential, getIntegrationCredential } from '../services/integrations/secrets.js';
+import { storeIntegrationCredential, getIntegrationCredential, encryptSecret, decryptSecret } from '../services/integrations/secrets.js';
 
 const router = Router();
 
@@ -39,13 +39,11 @@ export async function verifyAndConsumeOAuthStateNonce(nonce: string, provider: s
 
     if (!data) return null;
 
-    // Check expiration
     if (new Date(data.expires_at).getTime() < Date.now()) {
       await supabase.from('oauth_state_nonces').delete().eq('nonce', nonce);
       return null;
     }
 
-    // Atomic single-use consumption
     await supabase.from('oauth_state_nonces').delete().eq('nonce', nonce);
     return data.workspace_id;
   } catch {
@@ -53,7 +51,132 @@ export async function verifyAndConsumeOAuthStateNonce(nonce: string, provider: s
   }
 }
 
-// ─── Stage 4: Live Connection Status & Disconnect ──────────────────────
+// ─── Platform OAuth Configuration Resolution (Option A) ───────────────
+
+export async function getPlatformOAuthConfig(provider: string) {
+  try {
+    const { data } = await supabase
+      .from('platform_oauth_config')
+      .select('*')
+      .eq('provider', provider)
+      .single();
+
+    if (data && data.client_id) {
+      const decryptedSecret = data.client_secret_encrypted ? decryptSecret(data.client_secret_encrypted) : null;
+      return {
+        client_id: data.client_id,
+        client_secret: decryptedSecret,
+        extra_config: data.extra_config || {},
+        source: 'database' as const,
+      };
+    }
+  } catch {
+    // Non-fatal database lookup fallback
+  }
+
+  // Fallback to process.env configuration
+  if (provider === 'slack') {
+    return {
+      client_id: process.env.SLACK_CLIENT_ID || null,
+      client_secret: process.env.SLACK_CLIENT_SECRET || null,
+      extra_config: { signing_secret: process.env.SLACK_SIGNING_SECRET },
+      source: 'env' as const,
+    };
+  } else if (provider === 'github') {
+    return {
+      client_id: process.env.GITHUB_APP_NAME || 'company-brain-demo',
+      client_secret: process.env.GITHUB_WEBHOOK_SECRET || null,
+      extra_config: { app_name: process.env.GITHUB_APP_NAME || 'company-brain-demo' },
+      source: process.env.GITHUB_APP_NAME ? ('env' as const) : ('demo' as const),
+    };
+  } else if (provider === 'gmail') {
+    return {
+      client_id: process.env.GOOGLE_CLIENT_ID || null,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET || null,
+      extra_config: {},
+      source: 'env' as const,
+    };
+  }
+
+  return { client_id: null, client_secret: null, extra_config: {}, source: 'none' as const };
+}
+
+// ─── Stage 4 & Platform Config API Endpoints ───────────────────────────
+
+router.get('/platform-config', authenticate, requireRole(['admin']), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { data } = await supabase
+      .from('platform_oauth_config')
+      .select('provider, client_id, extra_config, updated_at');
+
+    const platformConfigMap = new Map((data || []).map((c) => [c.provider, c]));
+    const providers = ['slack', 'github', 'gmail'];
+
+    const result = await Promise.all(
+      providers.map(async (provider) => {
+        const dbConfig = platformConfigMap.get(provider);
+        const resolved = await getPlatformOAuthConfig(provider);
+
+        return {
+          provider,
+          configured: !!(resolved.client_id && (provider === 'github' || resolved.client_secret)),
+          client_id: dbConfig?.client_id || (resolved.source === 'env' ? resolved.client_id : null),
+          source: resolved.source,
+          extra_config: dbConfig?.extra_config || resolved.extra_config || {},
+          updated_at: dbConfig?.updated_at || null,
+        };
+      })
+    );
+
+    res.json({ success: true, platform_config: result });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch platform OAuth configuration.' });
+  }
+});
+
+router.post('/platform-config/:provider', authenticate, requireRole(['admin']), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const { provider } = req.params;
+    const { client_id, client_secret, extra_config } = req.body;
+
+    if (provider !== 'slack' && provider !== 'github' && provider !== 'gmail') {
+      res.status(400).json({ error: `Unsupported integration provider '${provider}'.` });
+      return;
+    }
+
+    if (!client_id) {
+      res.status(400).json({ error: 'Missing client_id / App slug parameter.' });
+      return;
+    }
+
+    const upsertPayload: Record<string, any> = {
+      provider,
+      client_id,
+      extra_config: extra_config || {},
+      configured_by_user_id: user.user_id,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (client_secret) {
+      upsertPayload.client_secret_encrypted = encryptSecret(client_secret);
+    }
+
+    const { error } = await supabase
+      .from('platform_oauth_config')
+      .upsert(upsertPayload, { onConflict: 'provider' });
+
+    if (error) {
+      console.error(`[Platform Config Error] Failed to save ${provider} config:`, error);
+      res.status(500).json({ error: 'Database error saving platform configuration.' });
+      return;
+    }
+
+    res.json({ success: true, message: `Successfully updated ${provider} platform OAuth configuration.` });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error saving platform configuration.' });
+  }
+});
 
 router.get('/status', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
@@ -75,29 +198,37 @@ router.get('/status', authenticate, async (req: Request, res: Response): Promise
 
     const providers = ['slack', 'github', 'gmail', 'zendesk', 'linear', 'database', 'stripe'];
 
-    const result = providers.map((provider) => {
-      const cred = credentialMap.get(provider);
-      const inst = installationMap.get(provider);
+    const result = await Promise.all(
+      providers.map(async (provider) => {
+        const cred = credentialMap.get(provider);
+        const inst = installationMap.get(provider);
 
-      let isConnected = false;
-      let displayStatus = 'Not Connected';
+        let isConnected = false;
+        let displayStatus = 'Not Connected';
 
-      if (cred?.status === 'connected' || inst) {
-        isConnected = true;
-        displayStatus = 'Active';
-      } else if (process.env[`${provider.toUpperCase()}_BOT_TOKEN`] || process.env[`${provider.toUpperCase()}_API_TOKEN`]) {
-        isConnected = true;
-        displayStatus = 'Configured via .env';
-      }
+        if (cred?.status === 'connected' || inst) {
+          isConnected = true;
+          displayStatus = 'Active';
+        } else if (process.env[`${provider.toUpperCase()}_BOT_TOKEN`] || process.env[`${provider.toUpperCase()}_API_TOKEN`]) {
+          isConnected = true;
+          displayStatus = 'Configured via .env';
+        }
 
-      return {
-        provider,
-        connected: isConnected,
-        status: displayStatus,
-        external_org_id: cred?.external_org_id || inst?.external_org_id || null,
-        connected_at: cred?.connected_at || null,
-      };
-    });
+        const platformConfig = ['slack', 'github', 'gmail'].includes(provider)
+          ? await getPlatformOAuthConfig(provider)
+          : null;
+
+        return {
+          provider,
+          connected: isConnected,
+          status: displayStatus,
+          platform_configured: !!(platformConfig?.client_id && (provider === 'github' || platformConfig?.client_secret)),
+          is_demo_mode: platformConfig?.source === 'demo',
+          external_org_id: cred?.external_org_id || inst?.external_org_id || null,
+          connected_at: cred?.connected_at || null,
+        };
+      })
+    );
 
     res.json({ success: true, workspace_id: workspaceId, integrations: result });
   } catch (err) {
@@ -120,7 +251,7 @@ router.post('/:provider/disconnect', authenticate, requireRole(['admin']), async
   }
 });
 
-// ─── Gap L & I: Secure POST /connect-url Authorization Endpoint ────────
+// ─── Option B2 & Option A2: Secure POST /connect-url Endpoint ─────────────
 
 router.post('/:provider/connect-url', authenticate, requireRole(['admin']), async (req: Request, res: Response): Promise<void> => {
   try {
@@ -132,15 +263,12 @@ router.post('/:provider/connect-url', authenticate, requireRole(['admin']), asyn
       return;
     }
 
-    const configCheck: Record<string, boolean> = {
-      slack: !!(process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET),
-      github: !!process.env.GITHUB_APP_NAME,
-      gmail: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-    };
+    const platformConfig = await getPlatformOAuthConfig(provider);
+    const isConfigured = !!(platformConfig.client_id && (provider === 'github' || platformConfig.client_secret));
 
-    if (!configCheck[provider]) {
-      res.status(503).json({
-        error: `${provider.toUpperCase()} integration is not configured on this server yet. Ask your administrator to set the required OAuth environment variables in server/.env.`,
+    if (!isConfigured) {
+      res.status(530).json({
+        error: `${provider.toUpperCase()} integration is not configured on this server yet. Set up OAuth App credentials via the wizard or in server/.env.`,
         code: 'integration_not_configured',
       });
       return;
@@ -148,23 +276,22 @@ router.post('/:provider/connect-url', authenticate, requireRole(['admin']), asyn
 
     const nonce = await createOAuthStateNonce(user.workspace_id, provider);
     let authorizeUrl = '';
+    const isDemoMode = platformConfig.source === 'demo';
 
     if (provider === 'slack') {
-      const clientId = process.env.SLACK_CLIENT_ID || 'mock-slack-client-id';
       const params = new URLSearchParams({
-        client_id: clientId,
+        client_id: platformConfig.client_id!,
         scope: 'channels:history,channels:read,chat:write',
         redirect_uri: `${APP_BASE_URL}/api/integrations/slack/callback`,
         state: nonce,
       });
       authorizeUrl = `https://slack.com/oauth/v2/authorize?${params.toString()}`;
     } else if (provider === 'github') {
-      const appName = process.env.GITHUB_APP_NAME || 'company-brain-app';
+      const appName = platformConfig.client_id || 'company-brain-demo';
       authorizeUrl = `https://github.com/apps/${appName}/installations/new?state=${nonce}`;
     } else if (provider === 'gmail') {
-      const clientId = process.env.GOOGLE_CLIENT_ID || 'mock-google-client-id';
       const params = new URLSearchParams({
-        client_id: clientId,
+        client_id: platformConfig.client_id!,
         redirect_uri: `${APP_BASE_URL}/api/integrations/gmail/callback`,
         response_type: 'code',
         access_type: 'offline',
@@ -175,7 +302,11 @@ router.post('/:provider/connect-url', authenticate, requireRole(['admin']), asyn
       authorizeUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
     }
 
-    res.json({ success: true, authorize_url: authorizeUrl });
+    res.json({
+      success: true,
+      authorize_url: authorizeUrl,
+      demo_mode: isDemoMode,
+    });
   } catch (err) {
     console.error('[Connect URL Error]:', err);
     res.status(500).json({ error: 'Failed to generate authorization URL.' });
@@ -194,8 +325,9 @@ router.get('/slack/callback', async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const clientId = process.env.SLACK_CLIENT_ID || '';
-    const clientSecret = process.env.SLACK_CLIENT_SECRET || '';
+    const platformConfig = await getPlatformOAuthConfig('slack');
+    const clientId = platformConfig.client_id || '';
+    const clientSecret = platformConfig.client_secret || '';
 
     let teamId = 'T_DEMO_SLACK_ORG';
     let accessToken = 'xoxb-mock-demo-slack-token';
@@ -292,8 +424,9 @@ router.get('/gmail/callback', async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    const clientId = process.env.GOOGLE_CLIENT_ID || '';
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+    const platformConfig = await getPlatformOAuthConfig('gmail');
+    const clientId = platformConfig.client_id || '';
+    const clientSecret = platformConfig.client_secret || '';
 
     let accessToken = 'ya29.mock-gmail-access-token';
     let refreshToken = '1//mock-gmail-refresh-token';

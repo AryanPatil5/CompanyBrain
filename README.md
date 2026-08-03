@@ -83,36 +83,44 @@ Run database migrations in Supabase SQL Editor:
 15. `server/supabase/015_custom_access_token_hook.sql`
 16. `server/supabase/016_integration_credentials.sql`
 17. `server/supabase/017_oauth_state_nonces.sql`
+18. `server/supabase/018_platform_oauth_config.sql`
 
 #### Custom Access Token Hook Setup (Supabase Dashboard)
 1. Go to **Supabase Dashboard** -> **Authentication** -> **Hooks (Beta)**.
 2. Enable **Custom Access Token Hook**.
 3. Select scheme: `public.custom_access_token_hook`.
 
-### Connecting Slack, GitHub & Gmail (OAuth Setup)
+### Connecting Slack, GitHub & Gmail (OAuth Setup & Demo Mode)
 
 To allow workspace administrators to connect integrations via the UI's **Settings → Integrations** modal:
+
+#### Option B: Zero-Config GitHub Trial (Demo Mode)
+- GitHub App connection comes pre-configured out of the box using a shared demo app default (`company-brain-demo`).
+- Users can click **Connect GitHub** immediately without setting environment variables or developer apps.
+
+#### Option A: In-App Guided OAuth Setup Wizard
+Administrators can paste their own custom app credentials directly into the UI via the **In-App OAuth Wizard** (**Settings → Integrations → Configure App**):
 
 #### 1. Slack OAuth App Setup
 - Create a Slack App at [api.slack.com/apps](https://api.slack.com/apps).
 - Go to **OAuth & Permissions** -> Add Redirect URL: `{APP_BASE_URL}/api/integrations/slack/callback` (e.g. `http://localhost:5001/api/integrations/slack/callback`).
 - Under **Bot Token Scopes**, add `channels:history`, `channels:read`, `chat:write`.
-- Copy **Client ID**, **Client Secret**, and **Signing Secret** into `server/.env` (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`).
+- Save Client ID and Client Secret into the **In-App Wizard** or `server/.env` (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`).
 
 #### 2. GitHub App Setup
 - Create a GitHub App at **Settings** -> **Developer settings** -> **GitHub Apps**.
 - Set **Webhook URL** to `{APP_BASE_URL}/api/ingestion/webhook/github`.
 - Set **Setup / Callback URL** to `{APP_BASE_URL}/api/integrations/github/callback`.
-- Copy the App's URL slug into `GITHUB_APP_NAME` and the Webhook secret into `GITHUB_WEBHOOK_SECRET` in `server/.env`.
+- Save the App's URL slug into the **In-App Wizard** or `server/.env` (`GITHUB_APP_NAME`, `GITHUB_WEBHOOK_SECRET`).
 
 #### 3. Gmail OAuth Client Setup
 - Open [Google Cloud Console](https://console.cloud.google.com) -> **APIs & Services** -> **Credentials**.
 - Click **Create Credentials** -> **OAuth client ID** -> Select **Web application**.
 - Add Authorized Redirect URI: `{APP_BASE_URL}/api/integrations/gmail/callback`.
 - Enable the **Gmail API** under Library.
-- Copy **Client ID** and **Client Secret** into `server/.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
+- Save Client ID and Client Secret into the **In-App Wizard** or `server/.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`).
 
-*Once configured, workspace admins can connect each provider directly from the UI's Settings -> Integrations modal without manual database or `.env` modifications.*
+*Once configured, workspace admins can connect each provider directly from the UI's Settings -> Integrations modal without requiring server restarts or file edits.*
 
 #### Provision Admin & Team Users
 Provision initial admin users with assigned workspace roles using the server script:
