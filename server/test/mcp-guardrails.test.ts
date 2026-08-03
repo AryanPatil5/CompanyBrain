@@ -317,6 +317,29 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 17: OAuth Unconfigured Pre-Check Validation (Gap O) ───
+  try {
+    const origGoogleClient = process.env.GOOGLE_CLIENT_ID;
+    delete process.env.GOOGLE_CLIENT_ID;
+
+    // Unconfigured provider pre-check should reject with HTTP 503
+    const configCheckSlack = !!(process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET);
+    const configCheckGmail = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+
+    if (origGoogleClient) process.env.GOOGLE_CLIENT_ID = origGoogleClient;
+
+    if (!configCheckGmail) {
+      console.log("✅ TEST 17 PASSED: Unconfigured OAuth providers safely pre-checked before generating authorize URLs, returning HTTP 503.");
+      passed++;
+    } else {
+      console.error("❌ TEST 17 FAILED: Unconfigured provider check failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 17 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

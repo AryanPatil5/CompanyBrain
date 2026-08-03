@@ -132,6 +132,20 @@ router.post('/:provider/connect-url', authenticate, requireRole(['admin']), asyn
       return;
     }
 
+    const configCheck: Record<string, boolean> = {
+      slack: !!(process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET),
+      github: !!process.env.GITHUB_APP_NAME,
+      gmail: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+    };
+
+    if (!configCheck[provider]) {
+      res.status(503).json({
+        error: `${provider.toUpperCase()} integration is not configured on this server yet. Ask your administrator to set the required OAuth environment variables in server/.env.`,
+        code: 'integration_not_configured',
+      });
+      return;
+    }
+
     const nonce = await createOAuthStateNonce(user.workspace_id, provider);
     let authorizeUrl = '';
 

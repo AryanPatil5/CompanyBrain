@@ -4,11 +4,17 @@ import { supabase } from '../../config/supabase.js';
 
 dotenv.config();
 
-const ENCRYPTION_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VAULT_SECRET_KEY || 'default-company-brain-secret-key-32b';
+const ENCRYPTION_SECRET = process.env.VAULT_SECRET_KEY;
+
+if (!ENCRYPTION_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: VAULT_SECRET_KEY environment variable is missing in production mode.');
+}
+
 const ALGORITHM = 'aes-256-gcm';
 
 function getEncryptionKey(): Buffer {
-  return crypto.createHash('sha256').update(ENCRYPTION_SECRET).digest();
+  const secret = ENCRYPTION_SECRET || 'dev-only-insecure-default-vault-key-32b';
+  return crypto.createHash('sha256').update(secret).digest();
 }
 
 /**

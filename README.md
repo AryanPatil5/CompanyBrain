@@ -59,10 +59,11 @@ PORT=5001
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 SUPABASE_ANON_KEY=your_public_anon_key
+VAULT_SECRET_KEY=generate_via_openssl_rand_hex_32
 OPENROUTER_API_KEY=your_openrouter_key
 ```
 
-*Note: User authentication is handled natively by Supabase Auth session tokens (verified via `supabase.auth.getUser()`). Hand-rolled HMAC JWT signing (`JWT_SECRET`) has been replaced by Supabase Auth.*
+*Note: User authentication is handled natively by Supabase Auth session tokens. OAuth tokens are encrypted at rest using AES-256-GCM (`VAULT_SECRET_KEY`). Generate a secret key via `openssl rand -hex 32`.*
 
 Run database migrations in Supabase SQL Editor:
 1. `server/supabase/create_skills_sops.sql`
