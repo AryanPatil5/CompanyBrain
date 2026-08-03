@@ -1,8 +1,10 @@
 import { supabase } from '../../config/supabase.js';
+import { validateTriple, type GraphTriple } from './ontologyCompiler.js';
+import { disambiguateTriple } from './entityDisambiguator.js';
 
 export interface GraphNode {
   id: string;
-  label: 'Person' | 'System' | 'SOP' | 'Rule' | 'Step' | 'Entity';
+  label: 'Person' | 'System' | 'SOP' | 'Rule' | 'Step' | 'Policy' | 'Team' | 'Role' | 'Entity';
   name: string;
   properties?: Record<string, any>;
   workspace_id?: string;
@@ -12,7 +14,7 @@ export interface GraphEdge {
   id?: string;
   source_id: string;
   target_id: string;
-  edge_type: 'OWNS' | 'REQUIRES' | 'MODIFIES' | 'DEPENDS_ON' | 'EXECUTES';
+  edge_type: 'OWNS' | 'REQUIRES' | 'MODIFIES' | 'DEPENDS_ON' | 'EXECUTES' | 'HAS_STEP' | 'REQUIRES_ROLE' | 'TARGETS_SYSTEM' | 'SUPERSEDES' | 'GOVERNED_BY';
   properties?: Record<string, any>;
 }
 
@@ -44,7 +46,7 @@ export async function executeCypher(cypherQuery: string, params?: Record<string,
 }
 
 /**
- * Adds an entity node (Person, System, SOP, Rule, Step) to the graph.
+ * Adds an entity node to the graph.
  */
 export async function addEntityNode(
   label: GraphNode['label'],
@@ -78,7 +80,7 @@ export async function addEntityNode(
 }
 
 /**
- * Creates a directed edge relationship between two graph nodes (OWNS, REQUIRES, MODIFIES, DEPENDS_ON).
+ * Creates a directed edge relationship between two graph nodes.
  */
 export async function createRelationship(
   sourceId: string,
@@ -108,6 +110,69 @@ export async function createRelationship(
   }
 
   return edge;
+}
+
+/**
+ * Processes raw knowledge triples through disambiguation & ontology validation, then executes Cypher MERGE queries into Apache AGE.
+ */
+export async function persistGraphTriples(
+  workspaceId: string,
+  triples: GraphTriple[]
+): Promise<{ persistedCount: number; rejectedCount: number; validTriples: GraphTriple[] }> {
+  let persistedCount = 0;
+  let rejectedCount = 0;
+  const validTriples: GraphTriple[] = [];
+
+  for (const rawTriple of triples) {
+    // 1. Entity Disambiguation (maps synonyms like "Postgres" -> "postgresql_db")
+    const disambiguated = disambiguateTriple(rawTriple);
+
+    // 2. Ontology Schema Validation (checks node types and predicate relationships)
+    const validation = validateTriple(disambiguated);
+
+    if (!validation.valid) {
+      console.warn(`[GraphService Warning] Non-compliant triple rejected (${validation.reason}):`, rawTriple);
+      rejectedCount++;
+      continue;
+    }
+
+    validTriples.push(disambiguated);
+
+    // 3. Persist Subject Node
+    await addEntityNode(disambiguated.subjectType as GraphNode['label'], {
+      id: disambiguated.subject,
+      name: disambiguated.metadata?.rawSubject || disambiguated.subject,
+      workspace_id: workspaceId,
+    });
+
+    // 4. Persist Object Node
+    await addEntityNode(disambiguated.objectType as GraphNode['label'], {
+      id: disambiguated.object,
+      name: disambiguated.metadata?.rawObject || disambiguated.object,
+      workspace_id: workspaceId,
+    });
+
+    // 5. Persist Edge Relationship
+    await createRelationship(
+      disambiguated.subject,
+      disambiguated.object,
+      disambiguated.predicate as GraphEdge['edge_type'],
+      disambiguated.metadata || {}
+    );
+
+    // 6. Execute Cypher MERGE statement into Apache AGE graph workspace
+    const cypherMerge = `
+      MERGE (a:${disambiguated.subjectType} {id: '${disambiguated.subject}', workspace_id: '${workspaceId}'})
+      MERGE (b:${disambiguated.objectType} {id: '${disambiguated.object}', workspace_id: '${workspaceId}'})
+      MERGE (a)-[r:${disambiguated.predicate}]->(b)
+      RETURN a, r, b
+    `;
+    await executeCypher(cypherMerge);
+
+    persistedCount++;
+  }
+
+  return { persistedCount, rejectedCount, validTriples };
 }
 
 /**
