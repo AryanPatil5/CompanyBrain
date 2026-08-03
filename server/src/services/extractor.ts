@@ -1,11 +1,10 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 import { supabase } from '../config/supabase.js';
+import { generateText } from './aiProvider.js';
+import { addEntityNode, createRelationship } from './graph/graphService.js';
 
 dotenv.config();
-
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical';
 
@@ -18,6 +17,18 @@ export interface SOPStep {
   on_failure?: string;
 }
 
+export interface GraphEntityTriple {
+  id: string;
+  name: string;
+  type: 'Person' | 'System' | 'SOP' | 'Rule' | 'Step' | 'Entity';
+}
+
+export interface GraphRelationshipTriple {
+  source: string;
+  target: string;
+  relationship_type: 'OWNS' | 'REQUIRES' | 'MODIFIES' | 'DEPENDS_ON' | 'EXECUTES';
+}
+
 export interface ExtractedSOP {
   is_valid_sop: boolean;
   confidence_score: number;
@@ -26,6 +37,8 @@ export interface ExtractedSOP {
   trigger_condition: string;
   preconditions: string[];
   execution_steps: SOPStep[];
+  entities?: GraphEntityTriple[];
+  relationships?: GraphRelationshipTriple[];
   risk_level: RiskLevel;
   requires_human_gate: boolean;
 }
@@ -40,6 +53,18 @@ const SOPStepSchema = z.object({
   on_failure: z.string().nullable().optional().transform(v => v === null ? undefined : v),
 });
 
+const GraphEntitySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(['Person', 'System', 'SOP', 'Rule', 'Step', 'Entity']),
+});
+
+const GraphRelationshipSchema = z.object({
+  source: z.string(),
+  target: z.string(),
+  relationship_type: z.enum(['OWNS', 'REQUIRES', 'MODIFIES', 'DEPENDS_ON', 'EXECUTES']),
+});
+
 const ExtractedSOPSchema = z.object({
   is_valid_sop: z.boolean(),
   confidence_score: z.number(),
@@ -48,6 +73,8 @@ const ExtractedSOPSchema = z.object({
   trigger_condition: z.string(),
   preconditions: z.array(z.string()),
   execution_steps: z.array(SOPStepSchema),
+  entities: z.array(GraphEntitySchema).optional().default([]),
+  relationships: z.array(GraphRelationshipSchema).optional().default([]),
   risk_level: z.enum(['Low', 'Medium', 'High', 'Critical']),
   requires_human_gate: z.boolean(),
 });
@@ -62,6 +89,9 @@ You are an expert Enterprise Knowledge Engineer. Your job is to analyze noisy te
 - **Critical Risk**: Secret rotation, revoking admin credentials, bulk data deletion, financial overrides > $10,000.
 
 If risk_level is "High" or "Critical", set "requires_human_gate" to true.
+
+### Knowledge Graph Extraction:
+Extract structured entity nodes (Person, System, SOP, Rule, Step) and directed relationships (OWNS, REQUIRES, MODIFIES, DEPENDS_ON, EXECUTES) mentioned in the document.
 
 ### Instructions:
 1. Ignore casual banter, greetings, chit-chat, and irrelevant side conversations.
@@ -106,39 +136,20 @@ Return JSON output matching this schema:
       "on_failure": string or null — fallback action if this step fails
     }
   ],
+  "entities": [
+    { "id": "sys_stripe", "name": "Stripe", "type": "System" }
+  ],
+  "relationships": [
+    { "source": "sys_stripe", "target": "sop_billing", "relationship_type": "REQUIRES" }
+  ],
   "risk_level": "Low" | "Medium" | "High" | "Critical",
   "requires_human_gate": boolean
 }`;
 
-    const response = await fetch(OPENROUTER_BASE_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'http://localhost:5001',
-        'X-Title': 'Company Brain',
-      },
-      body: JSON.stringify({
-        model: 'inclusionai/ling-3.0-flash:free',
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.1,
-        max_tokens: 4000,
-      }),
-    });
-
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error(`OpenRouter API error (${response.status}): ${errBody}`);
-    }
-
-    const data = await response.json();
-    const rawText = data.choices?.[0]?.message?.content?.trim();
+    const rawText = await generateText(userPrompt, SYSTEM_PROMPT);
 
     if (!rawText) {
-      throw new Error('Empty response from OpenRouter.');
+      throw new Error('Empty response from AI Provider.');
     }
 
     const cleanJson = rawText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
@@ -160,6 +171,27 @@ Return JSON output matching this schema:
 
     if (!validated.is_valid_sop || validated.confidence_score < 0.4) {
       return null;
+    }
+
+    // Persist extracted graph entities and relationships into Apache AGE graph space
+    try {
+      if (Array.isArray(validated.entities)) {
+        for (const ent of validated.entities) {
+          await addEntityNode(ent.type, {
+            id: ent.id,
+            name: ent.name,
+            workspace_id: workspaceId,
+          });
+        }
+      }
+
+      if (Array.isArray(validated.relationships)) {
+        for (const rel of validated.relationships) {
+          await createRelationship(rel.source, rel.target, rel.relationship_type);
+        }
+      }
+    } catch (graphErr) {
+      console.warn('[Extractor Warning] Graph persistence failed:', graphErr);
     }
 
     return validated;

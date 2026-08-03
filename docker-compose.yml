@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: apache/age:latest
+    container_name: company_brain_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: brain_user
+      POSTGRES_PASSWORD: brain_password
+      POSTGRES_DB: company_brain
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  redis:
+    image: redis:alpine
+    container_name: company_brain_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

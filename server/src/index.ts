@@ -6,6 +6,7 @@ import sopsRouter from './routes/sops.js';
 import integrationsRouter from './routes/integrations.js';
 import { startMCPServer } from './services/mcp.js';
 import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
+import { startIngestionWorker, stopIngestionWorker } from './workers/ingestionWorker.js';
 
 dotenv.config();
 
@@ -61,10 +62,14 @@ startMCPServer();
 // Start Background Knowledge Crawler Worker
 startCrawlerWorker();
 
+// Start BullMQ Asynchronous Ingestion Worker (Concurrency: 2)
+startIngestionWorker();
+
 // Graceful Shutdown Handlers
-const shutdown = () => {
+const shutdown = async () => {
   console.log('[INFO] Gracefully shutting down Express server...');
   stopCrawlerWorker();
+  await stopIngestionWorker();
   server.close(() => {
     console.log('[INFO] Server closed and port released.');
     process.exit(0);

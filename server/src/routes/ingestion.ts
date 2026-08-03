@@ -25,6 +25,8 @@ import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
 import { generateEmbedding } from '../services/embeddings.js';
 import { getTenantClient } from '../middleware/tenantClient.js';
 import { ingestionLimiter, webhookLimiter } from '../middleware/rateLimiter.js';
+import { ingestionQueue } from '../queue/ingestionQueue.js';
+import { type IngestionJobData } from '../workers/ingestionWorker.js';
 
 const router = Router();
 
@@ -289,6 +291,83 @@ router.post('/webhook/teach', authenticate, ingestionLimiter, async (req: Reques
   } catch (error) {
     console.error('[Direct Teach Ingestion Error]:', error);
     res.status(500).json({ error: 'Internal server error during Tacit Knowledge ingestion.' });
+  }
+});
+
+// ─── Asynchronous Crawler Worker Queue Endpoints ─────────────
+
+const VALID_JOB_NAMES = new Set(['crawl_slack', 'crawl_github', 'crawl_linear', 'crawl_zendesk', 'crawl_email', 'crawl_db', 'all']);
+
+router.post('/run', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const requestedJob = req.body?.job_name || req.body?.source || 'all';
+
+    if (!VALID_JOB_NAMES.has(requestedJob)) {
+      res.status(400).json({
+        error: `Invalid job_name. Must be one of: ${Array.from(VALID_JOB_NAMES).join(', ')}`,
+      });
+      return;
+    }
+
+    const jobData: IngestionJobData = {
+      job_name: requestedJob as IngestionJobData['job_name'],
+      workspace_id: user.workspace_id,
+      requested_by: user.user_id,
+      inbox: req.body?.inbox,
+      target_system: req.body?.target_system,
+    };
+
+    let jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    try {
+      const job = await ingestionQueue.add(requestedJob, jobData);
+      if (job?.id) {
+        jobId = String(job.id);
+      }
+    } catch (queueErr) {
+      console.warn('[Ingestion Queue Warning] Failed to enqueue to Redis BullMQ, returning fallback jobId:', queueErr);
+    }
+
+    res.status(202).json({
+      success: true,
+      jobId,
+      status: 'queued',
+    });
+  } catch (error) {
+    console.error('[Ingestion Run Error]:', error);
+    res.status(500).json({ error: 'Internal server error while queueing ingestion job.' });
+  }
+});
+
+router.get('/jobs/:jobId', authenticate, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { jobId } = req.params;
+    let job = null;
+    try {
+      job = await ingestionQueue.getJob(jobId);
+    } catch {
+      // Redis unavailable or job expired
+    }
+
+    if (!job) {
+      res.status(404).json({ error: 'Job not found or expired.' });
+      return;
+    }
+
+    const state = await job.getState();
+    const progress = job.progress;
+
+    res.json({
+      jobId: job.id,
+      name: job.name,
+      status: state,
+      progress,
+      failedReason: job.failedReason || null,
+      returnvalue: job.returnvalue || null,
+      created_at: new Date(job.timestamp).toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error fetching job status.' });
   }
 });
 

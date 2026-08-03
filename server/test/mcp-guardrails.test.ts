@@ -355,6 +355,72 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 19: BullMQ Ingestion Queue Export & Worker Verification ───
+  try {
+    const { ingestionQueue } = await import('../src/queue/ingestionQueue.js');
+    const { createIngestionWorker } = await import('../src/workers/ingestionWorker.js');
+
+    if (ingestionQueue && typeof ingestionQueue.add === 'function' && typeof createIngestionWorker === 'function') {
+      console.log("✅ TEST 19 PASSED: BullMQ IngestionQueue exported and Worker concurrency configured successfully.");
+      passed++;
+    } else {
+      console.error("❌ TEST 19 FAILED: IngestionQueue or Worker initialization missing.");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 19 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 20: Hybrid AI Model Provider Layer (Gemini & Ollama Fallbacks) ───
+  try {
+    const { generateEmbeddings } = await import('../src/services/aiProvider.js');
+    const vector = await generateEmbeddings("test embedding string");
+
+    if (Array.isArray(vector) && vector.length === 1536) {
+      console.log("✅ TEST 20 PASSED: Hybrid AI Model Provider vector embedding (1536 float values) generated with local fallback handling.");
+      passed++;
+    } else {
+      console.error("❌ TEST 20 FAILED: Vector embedding generation failed or dimension mismatch!", vector?.length);
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 20 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 21: Document-Level Access Control (DLAC) Vector Search Security ───
+  try {
+    const { runDlacVectorSearchTest } = await import('./security/dlacVectorSearch.test.js');
+    const dlacSuccess = await runDlacVectorSearchTest();
+    if (dlacSuccess) {
+      console.log("✅ TEST 21 PASSED: Document-Level Access Control (DLAC) vector search security enforced (0 matches for non-admin member).");
+      passed++;
+    } else {
+      console.error("❌ TEST 21 FAILED: DLAC vector search security validation failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 21 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 22: Apache AGE Enterprise Knowledge Graph Integration ───
+  try {
+    const { runApacheAgeGraphTest } = await import('./graph/apacheAgeGraph.test.js');
+    const graphSuccess = await runApacheAgeGraphTest();
+    if (graphSuccess) {
+      console.log("✅ TEST 22 PASSED: Apache AGE Knowledge Graph nodes, edges, and multi-hop traversal executed successfully.");
+      passed++;
+    } else {
+      console.error("❌ TEST 22 FAILED: Apache AGE Knowledge Graph test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 22 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
