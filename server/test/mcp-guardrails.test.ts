@@ -421,6 +421,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 23: Reciprocal Rank Fusion (RRF) Hybrid Search Engine ───
+  try {
+    const { runHybridSearchTest } = await import('./retrieval/hybridSearch.test.js');
+    const hybridSuccess = await runHybridSearchTest();
+    if (hybridSuccess) {
+      console.log("✅ TEST 23 PASSED: Reciprocal Rank Fusion (RRF) hybrid search executed combining pgvector dense + Postgres sparse keyword matching.");
+      passed++;
+    } else {
+      console.error("❌ TEST 23 FAILED: RRF Hybrid search execution failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 23 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

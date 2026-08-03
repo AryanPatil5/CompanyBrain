@@ -3,6 +3,7 @@ import { supabase } from '../config/supabase.js';
 import { createVersion, confirmSOP, markStaleSOPs } from '../services/freshness.js';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { getTenantClient } from '../middleware/tenantClient.js';
+import { hybridSearch } from '../services/retrieval/hybridSearch.js';
 
 const router = Router();
 
@@ -36,6 +37,34 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     res.json({ sops: data });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch SOPs' });
+  }
+});
+
+// ─── GET hybrid search (Reciprocal Rank Fusion RRF) ──────────
+
+router.get('/search', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const query = (req.query.q || req.query.query || '').toString().trim();
+    const limit = parseInt((req.query.limit || '10').toString(), 10);
+
+    if (!query) {
+      res.status(400).json({ error: 'Search query string "q" is required' });
+      return;
+    }
+
+    const results = await hybridSearch({
+      query,
+      workspaceId: user.workspace_id,
+      userId: user.user_id,
+      role: user.role,
+      limit,
+    });
+
+    res.json({ success: true, count: results.length, results });
+  } catch (err) {
+    console.error('[Hybrid Search Route Error]:', err);
+    res.status(500).json({ error: 'Hybrid search execution failed' });
   }
 });
 
