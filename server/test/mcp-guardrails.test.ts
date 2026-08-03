@@ -501,6 +501,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 28: Entity Disambiguation Service (Synonyms & Metadata Preservation) ───
+  try {
+    const { runEntityDisambiguatorTest } = await import('./graph/entityDisambiguator.test.js');
+    const disambiguatorSuccess = await runEntityDisambiguatorTest();
+    if (disambiguatorSuccess) {
+      console.log("✅ TEST 28 PASSED: Entity Disambiguator mapped synonyms to canonical graph nodes and preserved raw string metadata.");
+      passed++;
+    } else {
+      console.error("❌ TEST 28 FAILED: Entity Disambiguator test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 28 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
