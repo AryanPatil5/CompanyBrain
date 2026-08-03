@@ -613,6 +613,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 35: Enterprise Multi-Provider Model Router & 429 Failover ───
+  try {
+    const { runModelRouterTest } = await import('./services/modelRouter.test.js');
+    const routerSuccess = await runModelRouterTest();
+    if (routerSuccess) {
+      console.log("✅ TEST 35 PASSED: Model Router completed text generation with multi-provider failover, exponential backoff, and token accounting.");
+      passed++;
+    } else {
+      console.error("❌ TEST 35 FAILED: Model Router test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 35 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
