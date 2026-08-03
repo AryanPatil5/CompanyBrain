@@ -9,6 +9,7 @@ import {
   crawlEmailInbox,
   crawlDatabaseLogs,
 } from '../services/crawler.js';
+import { parseDocument } from '../services/parsers/documentParser.js';
 
 export interface IngestionJobData {
   job_name: 'crawl_slack' | 'crawl_github' | 'crawl_linear' | 'crawl_zendesk' | 'crawl_email' | 'crawl_db' | 'all';

@@ -2,6 +2,7 @@ import { FastMCP } from 'fastmcp';
 import { z } from 'zod';
 import { supabase } from '../config/supabase.js';
 import { dispatchStepExecution } from './integrations/http_adapters.js';
+import { runWorkflow } from '../agents/orchestrator.js';
 
 export interface McpSessionContext {
   authenticated: boolean;
@@ -529,6 +530,35 @@ server.addTool({
 
     await logExecution(sopId, 'log_sop_execution', { notes, agent_label: agentLabel }, outcome, session.agentId);
     return JSON.stringify({ logged: true, sop_id: sopId, authenticated_agent_id: session.agentId, outcome });
+  },
+});
+
+// ─── Tool 8: Run Multi-Agent Orchestrated Workflow (Planner -> Auditor -> Executor) ───
+
+server.addTool({
+  name: 'run_orchestrated_workflow',
+  description: 'Decomposes complex requests into a Planner DAG execution plan, evaluates Auditor safety policy rules, pauses for human manager approval if high-risk, and executes approved steps.',
+  parameters: z.object({
+    query: z.string().describe('The user task or procedure request to execute'),
+    mcpToken: z.string().describe('Authenticated FastMCP API token'),
+    approvalId: z.string().uuid().optional().describe('Optional approval ticket ID if manager has approved a paused high-risk workflow'),
+  }),
+  execute: async ({ query, mcpToken, approvalId }) => {
+    const session = await authenticateMcpToken(mcpToken);
+    if (!session.authenticated) {
+      return JSON.stringify({ error: 'Unauthorized: Invalid or missing FastMCP API token.' });
+    }
+
+    const workflowResult = await runWorkflow(query, {
+      workspaceId: session.workspaceId,
+      userId: session.agentId,
+      userRole: session.trustRole === 'admin' ? 'admin' : 'member',
+      trustRole: session.trustRole,
+      mcpToken,
+      approvalId,
+    });
+
+    return JSON.stringify(workflowResult);
   },
 });
 

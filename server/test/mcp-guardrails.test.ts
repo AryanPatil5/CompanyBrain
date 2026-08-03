@@ -437,6 +437,38 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 24: Multi-Agent Framework (Planner -> Auditor -> Executor State Machine) ───
+  try {
+    const { runMultiAgentOrchestratorTest } = await import('./agents/multiAgentOrchestrator.test.js');
+    const orchestratorSuccess = await runMultiAgentOrchestratorTest();
+    if (orchestratorSuccess) {
+      console.log("✅ TEST 24 PASSED: Multi-agent state machine (Planner DAG, Auditor risk policy, Executor runner) verified successfully.");
+      passed++;
+    } else {
+      console.error("❌ TEST 24 FAILED: Multi-agent orchestrator test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 24 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 25: Layout-Aware Document Parser Service (Markdown Tables & Sections) ───
+  try {
+    const { runDocumentParserTest } = await import('./parsers/documentParser.test.js');
+    const parserSuccess = await runDocumentParserTest();
+    if (parserSuccess) {
+      console.log("✅ TEST 25 PASSED: Layout-aware document parser preserved Markdown tables and structural section headers.");
+      passed++;
+    } else {
+      console.error("❌ TEST 25 FAILED: Document parser test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 25 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
