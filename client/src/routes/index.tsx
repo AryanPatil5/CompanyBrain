@@ -8,6 +8,10 @@ import { SopInspector } from "@/components/SopInspector";
 import { TeachBrainModal } from "@/components/TeachBrainModal";
 import { FastMcpNetworkModal } from "@/components/FastMcpNetworkModal";
 import { IntegrationsModal } from "@/components/IntegrationsModal";
+import { IngestionStatusWidget } from "@/components/IngestionStatusWidget";
+import { HybridSearchBar } from "@/components/HybridSearchBar";
+import { AgentExecutionConsole } from "@/components/AgentExecutionConsole";
+import { GraphVisualizerPanel } from "@/components/GraphVisualizerPanel";
 import {
   fetchSops,
   approveSopApi,
@@ -240,24 +244,39 @@ function Index() {
             </div>
           )}
 
-          <SegmentedControl value={category} onChange={setCategory} />
+          {/* Active Tab View Switching */}
+          {activeTab === "graph" && (
+            <GraphVisualizerPanel />
+          )}
 
-          <section className="grid grid-cols-1 gap-5 pb-6 md:grid-cols-2 2xl:grid-cols-3">
-            {filtered.map((sop) => (
-              <SopCard
-                key={sop.id}
-                sop={sop}
-                onInspect={() => setActiveId(sop.id)}
-                onApprove={() => void approve(sop.id)}
-                onConfirm={() => void confirm(sop.id)}
-              />
-            ))}
-            {filtered.length === 0 && (
-              <p className="text-[13.5px] text-[#6e6e73]">
-                No SOPs indexed for this category yet.
-              </p>
-            )}
-          </section>
+          {activeTab === "agents" && (
+            <AgentExecutionConsole />
+          )}
+
+          {activeTab === "skills" && (
+            <>
+              <IngestionStatusWidget />
+              <HybridSearchBar />
+              <SegmentedControl value={category} onChange={setCategory} />
+
+              <section className="grid grid-cols-1 gap-5 pb-6 md:grid-cols-2 2xl:grid-cols-3">
+                {filtered.map((sop) => (
+                  <SopCard
+                    key={sop.id}
+                    sop={sop}
+                    onInspect={() => setActiveId(sop.id)}
+                    onApprove={() => void approve(sop.id)}
+                    onConfirm={() => void confirm(sop.id)}
+                  />
+                ))}
+                {filtered.length === 0 && (
+                  <p className="text-[13.5px] text-[#6e6e73]">
+                    No SOPs indexed for this category yet.
+                  </p>
+                )}
+              </section>
+            </>
+          )}
         </main>
       </div>
 

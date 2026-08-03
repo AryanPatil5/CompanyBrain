@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx test/mcp-guardrails.test.ts"
+    "test": "tsx test/mcp-guardrails.test.ts",
+    "test:e2e": "NODE_ENV=test tsx test/e2e/companyBrain.e2e.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",

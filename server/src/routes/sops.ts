@@ -4,6 +4,8 @@ import { createVersion, confirmSOP, markStaleSOPs } from '../services/freshness.
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { getTenantClient } from '../middleware/tenantClient.js';
 import { hybridSearch } from '../services/retrieval/hybridSearch.js';
+import { runWorkflow } from '../agents/orchestrator.js';
+import { getConnectedEntities } from '../services/graph/graphService.js';
 
 const router = Router();
 
@@ -65,6 +67,54 @@ router.get('/search', async (req: Request, res: Response): Promise<void> => {
   } catch (err) {
     console.error('[Hybrid Search Route Error]:', err);
     res.status(500).json({ error: 'Hybrid search execution failed' });
+  }
+});
+
+// ─── GET Apache AGE Graph Entities & Edges ───────────────────
+
+router.get('/graph', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
+
+    const { data: nodes } = await client.from('graph_nodes').select('*').eq('workspace_id', workspaceId).limit(50);
+    const { data: edges } = await client.from('graph_edges').select('*').limit(100);
+
+    res.json({
+      success: true,
+      nodes: nodes || [],
+      edges: edges || [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch graph data' });
+  }
+});
+
+// ─── POST Multi-Agent Workflow Execution ──────────────────────
+
+router.post('/workflow', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const { query, approval_id } = req.body;
+
+    if (!query) {
+      res.status(400).json({ error: 'Field "query" is required' });
+      return;
+    }
+
+    const workflowResult = await runWorkflow(query, {
+      workspaceId: user.workspace_id,
+      userId: user.user_id,
+      userRole: user.role,
+      trustRole: user.role === 'admin' ? 'admin' : 'low_trust',
+      approvalId: approval_id,
+    });
+
+    res.json(workflowResult);
+  } catch (err) {
+    console.error('[Workflow Execution Route Error]:', err);
+    res.status(500).json({ error: 'Workflow execution failed' });
   }
 });
 

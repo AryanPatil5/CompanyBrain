@@ -469,6 +469,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 26: Company Brain 5-Stage End-to-End (E2E) Integration Pipeline ───
+  try {
+    const { runCompanyBrainE2ETest } = await import('./e2e/companyBrain.e2e.test.js');
+    const e2eSuccess = await runCompanyBrainE2ETest();
+    if (e2eSuccess) {
+      console.log("✅ TEST 26 PASSED: All 5 sequential E2E pipeline stages (Ingestion, Apache AGE, Hybrid Search, Multi-Agent, Sandbox Execution) verified successfully.");
+      passed++;
+    } else {
+      console.error("❌ TEST 26 FAILED: E2E Integration pipeline test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 26 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
