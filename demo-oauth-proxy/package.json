@@ -1,0 +1,26 @@
+{
+  "name": "companybrain-demo-oauth-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "description": "Standalone service that holds the real Slack + Google OAuth client secrets for Company Brain's shared demo apps. Deployed separately from the main app so the secrets never live in the public repo or a customer's self-hosted .env.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.6.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.9",
+    "tsx": "^4.23.1",
+    "typescript": "^5.5.2"
+  }
+}
