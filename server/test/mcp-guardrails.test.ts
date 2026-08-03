@@ -565,6 +565,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 32: Attribute-Based Access Control (ABAC) Middleware Governance ───
+  try {
+    const { runAbacMiddlewareTest } = await import('./middleware/abacMiddleware.test.js');
+    const abacSuccess = await runAbacMiddlewareTest();
+    if (abacSuccess) {
+      console.log("✅ TEST 32 PASSED: ABAC middleware verified role hierarchy, resource sensitivity levels, and HTTP 403 Forbidden enforcement.");
+      passed++;
+    } else {
+      console.error("❌ TEST 32 FAILED: ABAC middleware test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 32 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
