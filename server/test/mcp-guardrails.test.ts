@@ -805,6 +805,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 47: E2B MicroVM Isolated Execution Engine ───
+  try {
+    const { runE2BSandboxEngineTest } = await import('./skills/e2bSandboxEngine.test.js');
+    const e2bSuccess = await runE2BSandboxEngineTest();
+    if (e2bSuccess) {
+      console.log("✅ TEST 47 PASSED: E2B MicroVM Sandbox executed JS code in isolated microVMs, blocked host process env leaks, and aborted runaway loops.");
+      passed++;
+    } else {
+      console.error("❌ TEST 47 FAILED: E2B MicroVM Sandbox test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 47 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
