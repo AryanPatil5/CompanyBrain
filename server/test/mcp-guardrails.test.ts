@@ -965,12 +965,12 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 57: NLI Grounding Score Evaluator & Hallucination Regression Pipeline ───
+  // ─── Test 57: Heuristic Claim Grounding Score Evaluator & Hallucination Regression Pipeline ───
   try {
     const { runHallucinationEvaluatorTest } = await import('./eval/hallucinationEvaluator.test.js');
     const evalSuccess = await runHallucinationEvaluatorTest();
     if (evalSuccess) {
-      console.log("✅ TEST 57 PASSED: Hallucination Evaluator verified NLI claim grounding scores and intercepted ungrounded outputs below 0.95 threshold.");
+      console.log("✅ TEST 57 PASSED: Hallucination Evaluator verified heuristic claim grounding scores and intercepted ungrounded outputs below 0.95 threshold.");
       passed++;
     } else {
       console.error("❌ TEST 57 FAILED: Hallucination Evaluator test failed!");

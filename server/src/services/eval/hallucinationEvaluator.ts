@@ -13,9 +13,11 @@ export interface BenchmarkEvaluationResult {
 }
 
 /**
- * Natural Language Inference (NLI) & Claim-to-Source Grounding Evaluator
- * Verifies that agent response claims are strictly supported by retrieved context source documents.
- * Enforces a strict 0.95 enterprise safety grounding threshold.
+ * Heuristic Claim-Matching & Grounding Evaluator
+ * Evaluates claim-to-source grounding using regex-based numeric/ID substring overlap matching against retrieved context.
+ * Calculates heuristic grounding fidelity score (enforcing a 0.95 safety threshold against unverified assertions).
+ * 
+ * TODO: Integrate NLI model-backed evaluation (e.g. LLM-as-a-judge prompt pass via aiProvider.ts) for full semantic claim entailment.
  */
 export async function evaluateGroundingScore(
   responseText: string,

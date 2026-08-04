@@ -12,8 +12,11 @@ export interface SelfHealResult {
 }
 
 /**
- * Analyzes runtime code execution errors (syntax, JSON format, variable typos)
- * and generates corrected code statements for self-healing retries.
+ * Tool Self-Healer Engine
+ * Performs heuristic regex-based repair for common syntax typos (missing return/function/const keywords,
+ * trailing commas, unbalanced parens, unclosed JSON objects) to allow instant execution retries.
+ * 
+ * TODO: Add an LLM-based self-healing pass via aiProvider.ts (feeding error traces and code) for complex runtime logic errors.
  */
 export function repairExecutableCode(code: string, errorTrace: string): string {
   let repaired = code;
