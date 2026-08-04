@@ -6,6 +6,7 @@ import { getTenantClient } from '../middleware/tenantClient.js';
 import { hybridSearch } from '../services/retrieval/hybridSearch.js';
 import { runWorkflow } from '../agents/orchestrator.js';
 import { getConnectedEntities } from '../services/graph/graphService.js';
+import { compileSopToAst, validateSopAst } from '../services/skills/sopCompiler.js';
 
 const router = Router();
 
@@ -469,16 +470,26 @@ router.delete('/:id', requireRole(['admin', 'approver']), async (req: Request, r
   }
 });
 
-// ─── POST staleness sweep ────────────────────────────────────
+// ─── POST Compile SOP Markdown to AST ──────────────────────────
 
-router.post('/check-staleness', requireRole(['admin', 'approver']), async (req: Request, res: Response): Promise<void> => {
+router.post('/compile', async (req: Request, res: Response): Promise<void> => {
   try {
-    const user = (req as AuthenticatedRequest).user!;
-    const thresholdDays = parseInt(req.query.days as string) || 30;
-    const count = await markStaleSOPs(thresholdDays, user.workspace_id);
-    res.json({ message: `Staleness sweep complete. ${count} SOPs marked stale.`, stale_count: count });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to run staleness sweep' });
+    const { markdownText, title } = req.body;
+    if (!markdownText || typeof markdownText !== 'string') {
+      res.status(400).json({ error: 'Body parameter "markdownText" is required.' });
+      return;
+    }
+
+    const ast = await compileSopToAst(markdownText, { title });
+    const validation = validateSopAst(ast);
+
+    res.json({
+      success: validation.valid,
+      ast,
+      validation,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `SOP compilation failed: ${err.message}` });
   }
 });
 

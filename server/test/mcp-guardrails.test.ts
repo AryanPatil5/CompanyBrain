@@ -789,6 +789,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 46: Automated Markdown SOP AST Compiler ───
+  try {
+    const { runSopCompilerTest } = await import('./skills/sopCompiler.test.js');
+    const sopCompilerSuccess = await runSopCompilerTest();
+    if (sopCompilerSuccess) {
+      console.log("✅ TEST 46 PASSED: SOP Compiler parsed markdown procedures into executable SopAST with decision gates and target system tools.");
+      passed++;
+    } else {
+      console.error("❌ TEST 46 FAILED: SOP Compiler test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 46 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

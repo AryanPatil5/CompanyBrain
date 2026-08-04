@@ -13,6 +13,7 @@ create table if not exists public.skills_sops (
   preconditions      text,
   summary       text,
   execution_steps    jsonb not null default '[]'::jsonb,
+  sop_ast            jsonb,
   source_doc_id      text,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
