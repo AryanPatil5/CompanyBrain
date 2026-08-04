@@ -709,6 +709,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 41: JWKS Bearer Token Verification & Verified ABAC Claim Enforcement ───
+  try {
+    const { runJwtAuthTest } = await import('./middleware/jwtAuth.test.js');
+    const jwtSuccess = await runJwtAuthTest();
+    if (jwtSuccess) {
+      console.log("✅ TEST 41 PASSED: JWKS JWT Authentication verified cryptographically signed Bearer tokens and enforced ABAC policies from claims.");
+      passed++;
+    } else {
+      console.error("❌ TEST 41 FAILED: JWKS JWT Authentication test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 41 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

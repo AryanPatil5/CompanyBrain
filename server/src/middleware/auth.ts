@@ -4,8 +4,9 @@ import { supabase } from '../config/supabase.js';
 export interface AuthenticatedRequest extends Request {
   user?: {
     user_id: string;
-    role: 'admin' | 'approver' | 'member';
+    role: 'admin' | 'approver' | 'member' | 'manager' | string;
     workspace_id: string;
+    clearance_level?: number;
   };
 }
 
@@ -86,7 +87,7 @@ export function requireRole(allowedRoles: Array<'admin' | 'approver' | 'member'>
       return res.status(401).json({ error: 'Unauthorized: user context missing' });
     }
 
-    if (!allowedRoles.includes(user.role)) {
+    if (!allowedRoles.includes(user.role as any)) {
       return res.status(403).json({ error: `Forbidden: role '${user.role}' is not authorized to perform this action` });
     }
 

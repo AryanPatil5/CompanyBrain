@@ -16,23 +16,25 @@ const ROLE_HIERARCHY: Record<string, number> = {
 };
 
 /**
- * Attribute-Based Access Control (ABAC) Middleware
- * Evaluates user attributes, role hierarchy, workspace context, and resource sensitivity levels.
+ * Hardened Attribute-Based Access Control (ABAC) Middleware
+ * Evaluates cryptographically verified claims on req.user (roles, clearance level, workspace context).
+ * Strictly ignores untrusted request headers or unverified body claims.
  */
 export function enforceABAC(policy: ABACPolicy) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
     const user = req.user;
 
-    // 1. Unauthenticated user check
+    // 1. Unauthenticated user check (must have cryptographically verified req.user)
     if (!user || !user.role) {
       res.status(401).json({
         error: 'Authentication Required',
-        message: 'Valid user session or API key is required to perform this action.',
+        message: 'Cryptographically verified JWT token context is required.',
       });
       return;
     }
 
     const userRoleLevel = ROLE_HIERARCHY[user.role.toLowerCase()] || 0;
+    const userClearance = user.clearance_level ?? 1;
 
     // 2. Role Constraint Verification
     if (policy.requiredRole) {
@@ -47,15 +49,13 @@ export function enforceABAC(policy: ABACPolicy) {
       }
     }
 
-    // 3. Sensitivity Level Constraint Verification (e.g. Sensitivity level 4-5 requires Manager/Admin)
-    const resourceSensitivity = Number(req.headers['x-sensitivity-level'] || req.body?.sensitivity_level || 1);
-
-    if (policy.maxSensitivityLevel && resourceSensitivity > policy.maxSensitivityLevel) {
+    // 3. Clearance / Sensitivity Level Constraint Verification
+    if (policy.maxSensitivityLevel && policy.maxSensitivityLevel > userClearance) {
       if (userRoleLevel < ROLE_HIERARCHY.manager) {
         res.status(403).json({
           error: 'ABAC Policy Violation',
           policy: policy.action,
-          message: `Resource sensitivity level (${resourceSensitivity}) exceeds permitted policy threshold (${policy.maxSensitivityLevel}) for non-manager user.`,
+          message: `Resource sensitivity level (${policy.maxSensitivityLevel}) exceeds user clearance level (${userClearance}).`,
         });
         return;
       }
