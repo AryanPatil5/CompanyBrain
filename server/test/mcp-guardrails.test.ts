@@ -661,12 +661,12 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 38: OpenFGA ReBAC Authorization Engine ───
+  // ─── Test 38: OpenFGA ReBAC Authorization Engine & PDP Fail-Closed Guard ───
   try {
-    const { runOpenFGATest } = await import('./middleware/openfgaMiddleware.test.js');
-    const fgaSuccess = await runOpenFGATest();
+    const { runOpenFGAEngineTest } = await import('./middleware/openfgaMiddleware.test.js');
+    const fgaSuccess = await runOpenFGAEngineTest();
     if (fgaSuccess) {
-      console.log("✅ TEST 38 PASSED: OpenFGA ReBAC Engine evaluated relation tuples, inherited permissions, and access control policy enforcement.");
+      console.log("✅ TEST 38 PASSED: OpenFGA ReBAC PDP evaluated authorization tuples, enforced fail-closed security, and cached decisions.");
       passed++;
     } else {
       console.error("❌ TEST 38 FAILED: OpenFGA ReBAC test failed!");

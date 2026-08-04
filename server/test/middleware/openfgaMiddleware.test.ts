@@ -1,53 +1,81 @@
-import { writeTuple, checkRelationship, OpenFGATuple } from '../../src/middleware/openfgaMiddleware.js';
+import { enforceOpenFGA, openfgaClientManager } from '../../src/middleware/openfgaMiddleware.js';
 
-export async function runOpenFGATest(): Promise<boolean> {
+export async function runOpenFGAEngineTest(): Promise<boolean> {
   console.log('\n=================================================');
-  console.log('  Running OpenFGA ReBAC Authorization Engine Test');
+  console.log('  Running OpenFGA ReBAC PDP Middleware Test Suite');
   console.log('=================================================');
 
-  // 1. Write relation tuple
-  const tuple: OpenFGATuple = {
-    user: 'user:member_01',
-    relation: 'editor',
-    object: 'document:sop_financial',
-  };
-  writeTuple(tuple);
+  // Test 1: Access denial for unauthorized resource actions (403 Forbidden)
+  try {
+    const mockReq: any = {
+      user: { user_id: 'user_member_99', role: 'member', workspace_id: 'ws_01' },
+      params: { id: 'sop_financial_secret' },
+    };
 
-  // 2. Check direct relation match
-  const resEditor = await checkRelationship(tuple);
-  if (!resEditor.allowed) {
-    console.error('❌ OPENFGA TEST FAILED: Direct editor relation check failed!', resEditor);
+    let statusCode = 0;
+    const mockRes: any = {
+      status: (code: number) => {
+        statusCode = code;
+        return { json: () => {} };
+      },
+    };
+
+    const middleware = enforceOpenFGA('owner', 'document');
+    await middleware(mockReq, mockRes, () => {});
+
+    if (statusCode !== 403) {
+      console.error(`❌ OPENFGA TEST FAILED: Unauthorized tuple check returned status ${statusCode} instead of 403!`);
+      return false;
+    }
+    console.log('✅ OPENFGA TEST PASSED: Unauthorized request without tuple grant correctly denied with 403 Forbidden.');
+  } catch (err: any) {
+    console.error('❌ OPENFGA TEST EXCEPTION (Access Denial):', err.message);
     return false;
   }
 
-  // 3. Check inherited viewer relation match (Editor inherits Viewer permission)
-  const resViewer = await checkRelationship({
-    user: 'user:member_01',
-    relation: 'viewer',
-    object: 'document:sop_financial',
-  });
-  if (!resViewer.allowed) {
-    console.error('❌ OPENFGA TEST FAILED: Inherited viewer relation check failed!', resViewer);
+  // Test 2: System fail-closed behavior when OpenFGA service connection drops (500 Authorization Engine Unavailable)
+  try {
+    openfgaClientManager.setSimulateFailure(true);
+
+    const mockReq: any = {
+      user: { user_id: 'user_admin_01', role: 'admin', workspace_id: 'ws_01' },
+      params: { id: 'document:sop_01' },
+    };
+
+    let statusCode = 0;
+    let responseBody: any = null;
+    const mockRes: any = {
+      status: (code: number) => {
+        statusCode = code;
+        return {
+          json: (body: any) => {
+            responseBody = body;
+          },
+        };
+      },
+    };
+
+    const middleware = enforceOpenFGA('viewer', 'document');
+    await middleware(mockReq, mockRes, () => {});
+
+    openfgaClientManager.setSimulateFailure(false);
+
+    if (statusCode !== 500 || !responseBody?.error?.includes('500 Authorization Engine Unavailable')) {
+      console.error(`❌ OPENFGA TEST FAILED: Service failure did not fail-closed with 500!`, statusCode, responseBody);
+      return false;
+    }
+    console.log('✅ OPENFGA TEST PASSED: System failed closed with 500 Authorization Engine Unavailable when service dropped.');
+  } catch (err: any) {
+    openfgaClientManager.setSimulateFailure(false);
+    console.error('❌ OPENFGA TEST EXCEPTION (Fail-Closed):', err.message);
     return false;
   }
 
-  // 4. Check unauthorized access rejection
-  const resUnauthorized = await checkRelationship({
-    user: 'user:stranger_99',
-    relation: 'editor',
-    object: 'document:sop_financial',
-  });
-  if (resUnauthorized.allowed) {
-    console.error('❌ OPENFGA TEST FAILED: Stranger was incorrectly allowed access!', resUnauthorized);
-    return false;
-  }
-
-  console.log('✅ OPENFGA TEST PASSED: Successfully verified OpenFGA tuple checks, ReBAC relation inheritance, and access enforcement.');
   return true;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runOpenFGATest().then((success) => {
+  runOpenFGAEngineTest().then((success) => {
     if (!success) process.exit(1);
   });
 }

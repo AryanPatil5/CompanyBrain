@@ -5,7 +5,9 @@ export interface ABACPolicy {
   action: string;
   resource: string;
   requiredRole?: 'admin' | 'manager' | 'member' | string;
-  maxSensitivityLevel?: number; // 1 (Public) to 5 (Top Secret)
+  maxSensitivityLevel?: number;
+  allowedIpRanges?: string[];
+  allowedScope?: string;
 }
 
 const ROLE_HIERARCHY: Record<string, number> = {
@@ -17,14 +19,13 @@ const ROLE_HIERARCHY: Record<string, number> = {
 
 /**
  * Hardened Attribute-Based Access Control (ABAC) Middleware
- * Evaluates cryptographically verified claims on req.user (roles, clearance level, workspace context).
- * Strictly ignores untrusted request headers or unverified body claims.
+ * Evaluates verified claims on req.user and dynamic environmental conditions (IP range, scopes, sensitivity levels).
  */
 export function enforceABAC(policy: ABACPolicy) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
     const user = req.user;
 
-    // 1. Unauthenticated user check (must have cryptographically verified req.user)
+    // 1. Unauthenticated user check
     if (!user || !user.role) {
       res.status(401).json({
         error: 'Authentication Required',
@@ -49,13 +50,26 @@ export function enforceABAC(policy: ABACPolicy) {
       }
     }
 
-    // 3. Clearance / Sensitivity Level Constraint Verification
+    // 3. Sensitivity Level Constraint Verification
     if (policy.maxSensitivityLevel && policy.maxSensitivityLevel > userClearance) {
       if (userRoleLevel < ROLE_HIERARCHY.manager) {
         res.status(403).json({
           error: 'ABAC Policy Violation',
           policy: policy.action,
           message: `Resource sensitivity level (${policy.maxSensitivityLevel}) exceeds user clearance level (${userClearance}).`,
+        });
+        return;
+      }
+    }
+
+    // 4. Dynamic Environmental IP Range Verification
+    if (policy.allowedIpRanges && policy.allowedIpRanges.length > 0) {
+      const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip || '127.0.0.1';
+      const isIpAllowed = policy.allowedIpRanges.some((range) => clientIp.includes(range) || range === '*');
+      if (!isIpAllowed) {
+        res.status(403).json({
+          error: 'ABAC Environment Policy Violation',
+          message: `Client IP "${clientIp}" is not permitted to access resource "${policy.resource}".`,
         });
         return;
       }
