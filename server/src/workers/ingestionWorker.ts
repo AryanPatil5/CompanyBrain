@@ -10,6 +10,7 @@ import {
   crawlDatabaseLogs,
 } from '../services/crawler.js';
 import { parseDocument } from '../services/parsers/documentParser.js';
+import { startTraceSpan, recordMetric } from '../middleware/telemetry.js';
 
 export interface IngestionJobData {
   job_name: 'crawl_slack' | 'crawl_github' | 'crawl_linear' | 'crawl_zendesk' | 'crawl_email' | 'crawl_db' | 'all';
@@ -65,6 +66,9 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
     'IngestionQueue',
     async (job: Job<IngestionJobData>) => {
       const { job_name, workspace_id, inbox } = job.data;
+      const span = startTraceSpan(`BullMQ Job ${job_name}`, { jobId: job.id, workspaceId: workspace_id });
+      const startTime = Date.now();
+
       console.log(`[IngestionWorker] Processing job ${job.id} (${job_name}) for workspace ${workspace_id}... (Attempt #${job.attemptsMade + 1})`);
 
       await job.updateProgress(10);
@@ -131,6 +135,10 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
         status: 'completed',
         result,
       });
+
+      const durationMs = Date.now() - startTime;
+      span.end('ok');
+      recordMetric('ingestion_queue_latency_ms', durationMs, { job_name, workspace_id });
 
       return result;
     },

@@ -11,6 +11,7 @@ import { startIngestionWorker, stopIngestionWorker } from './workers/ingestionWo
 import { startTemporalWorker, stopTemporalWorker } from './workers/temporalWorker.js';
 
 import { observabilityMiddleware, getMetricsSnapshot } from './middleware/observability.js';
+import { telemetryMiddleware, getPrometheusMetricsString } from './middleware/telemetry.js';
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ const app = express();
 const PORT = process.env.PORT || 5001; // Updated default port to 5001 to avoid macOS AirPlay conflict
 
 app.use(observabilityMiddleware());
+app.use(telemetryMiddleware());
 
 // Configure CORS to allow requests from local origins (Vite, TanStack, ngrok)
 app.use(
@@ -76,6 +78,11 @@ app.get('/health', (req, res) => {
 
 app.get('/api/metrics', (_req, res) => {
   res.json(getMetricsSnapshot());
+});
+
+app.get('/metrics', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+  res.send(getPrometheusMetricsString());
 });
 
 // Start Express API Server

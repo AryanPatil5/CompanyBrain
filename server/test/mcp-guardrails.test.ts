@@ -933,6 +933,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 55: OpenTelemetry Distributed Tracing & Prometheus Metrics ───
+  try {
+    const { runTelemetryTest } = await import('./middleware/telemetry.test.js');
+    const telemetrySuccess = await runTelemetryTest();
+    if (telemetrySuccess) {
+      console.log("✅ TEST 55 PASSED: OpenTelemetry trace spans wrapped HTTP/BullMQ/Temporal workflows and exposed Prometheus /metrics.");
+      passed++;
+    } else {
+      console.error("❌ TEST 55 FAILED: Telemetry test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 55 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
