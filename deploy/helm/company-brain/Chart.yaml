@@ -1,0 +1,15 @@
+apiVersion: v2
+name: company-brain
+description: Helm chart for enterprise Company Brain Autonomous AI Agent & Knowledge Graph Platform
+type: application
+version: 1.0.0
+appVersion: 1.0.0
+keywords:
+  - company-brain
+  - ai-agents
+  - knowledge-graph
+  - rag
+  - temporal
+maintainers:
+  - name: DeepMind Agentic Coding Team
+    email: support@companybrain.internal

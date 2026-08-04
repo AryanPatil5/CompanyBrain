@@ -981,6 +981,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 58: Kubernetes Helm Chart Deployment Manifests ───
+  try {
+    const { runHelmChartsTest } = await import('./infra/helmCharts.test.js');
+    const helmSuccess = await runHelmChartsTest();
+    if (helmSuccess) {
+      console.log("✅ TEST 58 PASSED: Kubernetes Helm chart manifests (Chart, values, API deployment, worker deployment, service) verified successfully.");
+      passed++;
+    } else {
+      console.error("❌ TEST 58 FAILED: Helm chart test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 58 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

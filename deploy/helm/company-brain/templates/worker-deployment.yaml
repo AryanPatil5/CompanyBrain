@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "company-brain.fullname" . }}-worker
+  labels:
+    app.kubernetes.io/name: company-brain-worker
+    app.kubernetes.io/component: ingestion-worker
+spec:
+  replicas: {{ .Values.autoscaling.minReplicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: company-brain-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: company-brain-worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.workerImage.repository }}:{{ .Values.workerImage.tag }}"
+          imagePullPolicy: {{ .Values.workerImage.pullPolicy }}
+          env:
+            - name: NODE_ENV
+              value: {{ .Values.env.NODE_ENV | quote }}
+            - name: REDIS_URL
+              value: {{ .Values.env.REDIS_URL | quote }}
+            - name: SUPABASE_URL
+              value: {{ .Values.env.SUPABASE_URL | quote }}
+          resources:
+            {{- toYaml .Values.workerResources | nindent 12 }}
