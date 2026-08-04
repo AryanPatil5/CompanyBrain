@@ -7,6 +7,7 @@ import integrationsRouter from './routes/integrations.js';
 import { startMCPServer } from './services/mcp.js';
 import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
 import { startIngestionWorker, stopIngestionWorker } from './workers/ingestionWorker.js';
+import { startTemporalWorker, stopTemporalWorker } from './workers/temporalWorker.js';
 
 import { observabilityMiddleware, getMetricsSnapshot } from './middleware/observability.js';
 
@@ -89,11 +90,15 @@ startCrawlerWorker();
 // Start BullMQ Asynchronous Ingestion Worker (Concurrency: 2)
 startIngestionWorker();
 
+// Start Temporal.io Durable Workflow Worker
+startTemporalWorker();
+
 // Graceful Shutdown Handlers
 const shutdown = async () => {
   console.log('[INFO] Gracefully shutting down Express server...');
   stopCrawlerWorker();
   await stopIngestionWorker();
+  await stopTemporalWorker();
   server.close(() => {
     console.log('[INFO] Server closed and port released.');
     process.exit(0);

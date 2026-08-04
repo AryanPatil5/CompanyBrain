@@ -679,13 +679,13 @@ async function runMcpGuardrailsTestSuite() {
 
   // ─── Test 39: Temporal.io Durable Workflow Orchestration Engine ───
   try {
-    const { runTemporalOrchestratorTest } = await import('./agents/temporalOrchestrator.test.js');
-    const temporalSuccess = await runTemporalOrchestratorTest();
+    const { runAgentWorkflowTest } = await import('./workflows/agentWorkflow.test.js');
+    const temporalSuccess = await runAgentWorkflowTest();
     if (temporalSuccess) {
-      console.log("✅ TEST 39 PASSED: Temporal Orchestrator governed multi-agent workflows, activity retries, and Human-in-the-Loop Temporal Signals.");
+      console.log("✅ TEST 39 PASSED: Temporal SDK Workflows governed multi-agent activities, activity retries, and Human-in-the-Loop Temporal Signals.");
       passed++;
     } else {
-      console.error("❌ TEST 39 FAILED: Temporal Orchestrator test failed!");
+      console.error("❌ TEST 39 FAILED: Temporal Workflow test failed!");
       failed++;
     }
   } catch (err) {
