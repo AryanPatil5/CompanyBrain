@@ -15,7 +15,6 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-// In-memory cache with 60s TTL for sub-millisecond response latency
 const decisionCache = new Map<string, CacheEntry>();
 const tupleStore = new Set<string>();
 
@@ -26,27 +25,16 @@ const tupleStore = new Set<string>();
 export class OpenFGAClientManager {
   private isSimulatingFailure = false;
 
-  /**
-   * Writes a ReBAC relationship tuple to the authorization store.
-   */
   public async writeTuple(tuple: OpenFGATuple): Promise<void> {
     const key = `${tuple.user}#${tuple.relation}@${tuple.object}`;
     tupleStore.add(key);
-    // Invalidate cache
     decisionCache.delete(key);
   }
 
-  /**
-   * Simulates OpenFGA service connection drop for fail-closed testing.
-   */
   public setSimulateFailure(fail: boolean): void {
     this.isSimulatingFailure = fail;
   }
 
-  /**
-   * Evaluates whether a user has a specific relationship to a target resource object.
-   * Fails closed if service connection drops or tuple is absent.
-   */
   public async checkTuple(tuple: OpenFGATuple): Promise<CheckTupleResult> {
     if (this.isSimulatingFailure) {
       throw new Error('[OpenFGA PDP Error]: Authorization service unreachable. Failing closed.');
@@ -55,7 +43,6 @@ export class OpenFGAClientManager {
     const { user, relation, object } = tuple;
     const cacheKey = `${user}#${relation}@${object}`;
 
-    // 1. Redis / In-memory 60s TTL Cache Check
     const cached = decisionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return {
@@ -65,16 +52,13 @@ export class OpenFGAClientManager {
       };
     }
 
-    // 2. Try SDK / Store Tuple Evaluation
     const directKey = `${user}#${relation}@${object}`;
     let allowed = tupleStore.has(directKey);
 
-    // Direct owner / admin wildcard rule inheritance
     if (!allowed && (user.includes('admin') || user.includes('owner'))) {
       allowed = true;
     }
 
-    // Write decision to 60s TTL cache
     decisionCache.set(cacheKey, {
       allowed,
       expiresAt: Date.now() + 60000,
@@ -85,6 +69,38 @@ export class OpenFGAClientManager {
       cached: false,
       resolvedVia: 'in_memory_store',
     };
+  }
+
+  /**
+   * Fetches list of document IDs the user has explicit read/viewer access to via OpenFGA ReBAC.
+   * Returns null if user has full admin access (no document filter restriction required).
+   */
+  public async getUserAccessibleDocumentIds(
+    userId: string,
+    workspaceId: string,
+    userRole = 'member'
+  ): Promise<string[] | null> {
+    if (userRole === 'admin' || userId.includes('admin')) {
+      return null; // Admin has unrestricted access to all documents
+    }
+
+    const normalizedUser = userId.startsWith('user:') ? userId : `user:${userId}`;
+    const accessibleDocIds: string[] = [];
+
+    for (const tupleKey of tupleStore) {
+      const [uRel, object] = tupleKey.split('@');
+      const [u, relation] = uRel.split('#');
+
+      if (u === normalizedUser && (relation === 'viewer' || relation === 'read' || relation === 'owner')) {
+        if (object.startsWith('document:')) {
+          accessibleDocIds.push(object.replace('document:', ''));
+        } else {
+          accessibleDocIds.push(object);
+        }
+      }
+    }
+
+    return Array.from(new Set(accessibleDocIds));
   }
 }
 

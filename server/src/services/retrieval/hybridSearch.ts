@@ -2,6 +2,7 @@ import { supabase } from '../../config/supabase.js';
 import { generateEmbedding, searchVectorContextDLAC, type DLACSearchResult } from '../embeddings.js';
 import { extractEntitiesAndTraverse } from './graphFusion.js';
 import { rerankResults } from './reranker.js';
+import { openfgaClientManager } from '../security/openfgaClient.js';
 
 export interface HybridSearchResult extends DLACSearchResult {
   rrfScore: number;
@@ -20,7 +21,7 @@ export interface HybridSearchParams {
 }
 
 /**
- * Reciprocal Rank Fusion (RRF) Hybrid Search Engine with GraphRAG Traversal Fusion and Cross-Encoder Reranking
+ * Reciprocal Rank Fusion (RRF) Hybrid Search Engine with OpenFGA HNSW Index Pre-Filtering
  */
 export async function hybridSearch(params: HybridSearchParams): Promise<HybridSearchResult[]> {
   const {
@@ -35,7 +36,10 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
   const cleanQuery = query.trim();
   if (!cleanQuery) return [];
 
-  // 1. Parallel Leg 1: Dense Vector Retrieval (pgvector + DLAC)
+  // Fetch OpenFGA user accessible document IDs for pre-filtered vector index execution
+  const allowedDocIds = await openfgaClientManager.getUserAccessibleDocumentIds(userId, workspaceId, role);
+
+  // 1. Parallel Leg 1: Dense Vector Retrieval (pgvector HNSW + OpenFGA Pre-filter)
   const densePromise = (async (): Promise<DLACSearchResult[]> => {
     try {
       const queryVector = await generateEmbedding(cleanQuery);
@@ -45,6 +49,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
         workspaceId,
         userId,
         role,
+        allowedDocIds,
         matchThreshold: 0.05,
         matchCount: limit * 3,
       });
@@ -69,9 +74,13 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
       }
 
       const isAdmin = role === 'admin';
-      const permitted = sops.filter(
-        (s) => isAdmin || (!s.requires_human_gate && (s.risk_level === 'Low' || s.risk_level === 'Medium'))
-      );
+      const permitted = sops.filter((s) => {
+        if (isAdmin) return true;
+        if (allowedDocIds !== null && allowedDocIds !== undefined) {
+          return allowedDocIds.includes(s.id);
+        }
+        return !s.requires_human_gate && (s.risk_level === 'Low' || s.risk_level === 'Medium');
+      });
 
       return permitted.map((s, idx) => ({
         id: s.id,
@@ -89,7 +98,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
   })();
 
   // 3. Parallel Leg 3: GraphRAG 2-Hop Knowledge Graph Traversal
-  const graphPromise = extractEntitiesAndTraverse(cleanQuery, workspaceId);
+  const graphPromise = extractEntitiesAndTraverse(cleanQuery, workspaceId, role);
 
   const [denseResults, sparseResults, graphFusion] = await Promise.all([
     densePromise,
@@ -154,7 +163,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
     }))
     .sort((a, b) => b.rrfScore - a.rrfScore);
 
-  // 5. Cross-Encoder Reranking: Refine Top-30 candidates down to Top-N
+  // 5. Cross-Encoder Reranking
   const finalReranked = await rerankResults(cleanQuery, mergedCandidates, limit);
 
   return finalReranked;

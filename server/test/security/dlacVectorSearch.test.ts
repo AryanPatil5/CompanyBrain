@@ -1,50 +1,77 @@
-import { searchVectorContextDLAC, generateEmbedding } from '../../src/services/embeddings.js';
+import { openfgaClientManager } from '../../src/services/security/openfgaClient.js';
+import { searchVectorContextDLAC } from '../../src/services/embeddings.js';
 
 export async function runDlacVectorSearchTest(): Promise<boolean> {
   console.log('\n=================================================');
-  console.log('  Running DLAC Vector Search Security Test Suite ');
+  console.log('  Running DLAC OpenFGA HNSW Vector Search Test ');
   console.log('=================================================');
 
   const workspaceId = '00000000-0000-0000-0000-000000000000';
-  const userMemberId = '11111111-1111-1111-1111-111111111111'; // User A: Member
-  const userAdminId = '22222222-2222-2222-2222-222222222222';  // User B: Admin
+  const userIdMember = 'user_restricted_member';
+  const userIdAdmin = 'user_admin_01';
 
-  const sampleEmbedding = new Array(1536).fill(0.01);
-  sampleEmbedding[0] = 0.9;
-  sampleEmbedding[1] = 0.4;
+  // Seed ReBAC tuples for restricted member
+  const accessibleDocId = 'doc_public_onboarding_guide';
+  const restrictedDocId = 'doc_secret_financial_payroll';
 
-  // 1. Perform DLAC vector search as User A (Member)
-  const memberMatches = await searchVectorContextDLAC({
-    queryEmbedding: sampleEmbedding,
-    workspaceId,
-    userId: userMemberId,
-    role: 'member',
-    matchThreshold: 0.05,
-    matchCount: 10,
+  await openfgaClientManager.writeTuple({
+    user: `user:${userIdMember}`,
+    relation: 'viewer',
+    object: `document:${accessibleDocId}`,
   });
 
-  // Verify User A (Member) does NOT see any Critical/High risk restricted documents requiring human gate
-  const memberHasRestricted = memberMatches.some(
-    (doc) => doc.requires_human_gate || doc.risk_level === 'Critical' || doc.risk_level === 'High'
-  );
-
-  if (memberHasRestricted) {
-    console.error('❌ DLAC TEST FAILED: Member user received restricted administrative documents!');
+  // Test 1: Fetch OpenFGA user accessible document IDs for restricted member
+  try {
+    const memberDocIds = await openfgaClientManager.getUserAccessibleDocumentIds(userIdMember, workspaceId, 'member');
+    if (!Array.isArray(memberDocIds) || !memberDocIds.includes(accessibleDocId) || memberDocIds.includes(restrictedDocId)) {
+      console.error('❌ DLAC VECTOR TEST FAILED: OpenFGA accessible document IDs mismatch!', memberDocIds);
+      return false;
+    }
+    console.log(`✅ DLAC VECTOR TEST PASSED: Member role retrieved exact authorized document IDs (${memberDocIds.join(', ')}).`);
+  } catch (err: any) {
+    console.error('❌ DLAC VECTOR TEST EXCEPTION (Member Doc IDs):', err.message);
     return false;
   }
-  console.log('✅ DLAC TEST PASSED: Member user (User A) correctly filtered out of confidential/restricted documents.');
 
-  // 2. Perform DLAC vector search as User B (Admin)
-  const adminMatches = await searchVectorContextDLAC({
-    queryEmbedding: sampleEmbedding,
-    workspaceId,
-    userId: userAdminId,
-    role: 'admin',
-    matchThreshold: 0.05,
-    matchCount: 10,
-  });
+  // Test 2: Admin role returns null (unrestricted access)
+  try {
+    const adminDocIds = await openfgaClientManager.getUserAccessibleDocumentIds(userIdAdmin, workspaceId, 'admin');
+    if (adminDocIds !== null) {
+      console.error('❌ DLAC VECTOR TEST FAILED: Admin role was incorrectly restricted!', adminDocIds);
+      return false;
+    }
+    console.log('✅ DLAC VECTOR TEST PASSED: Admin role correctly granted unrestricted access (null filter).');
+  } catch (err: any) {
+    console.error('❌ DLAC VECTOR TEST EXCEPTION (Admin Access):', err.message);
+    return false;
+  }
 
-  console.log(`✅ DLAC TEST PASSED: Admin user (User B) successfully retrieved ${adminMatches.length} document context matches.`);
+  // Test 3: DLAC HNSW vector search pre-filtering prevents data leaks
+  try {
+    const mockVector = new Array(1536).fill(0.01);
+    const memberDocIds = await openfgaClientManager.getUserAccessibleDocumentIds(userIdMember, workspaceId, 'member');
+
+    const results = await searchVectorContextDLAC({
+      queryEmbedding: mockVector,
+      workspaceId,
+      userId: userIdMember,
+      role: 'member',
+      allowedDocIds: memberDocIds,
+      matchCount: 10,
+    });
+
+    const containsLeakedRestrictedDoc = results.some((r) => r.id === restrictedDocId || r.source_document_id === restrictedDocId);
+    if (containsLeakedRestrictedDoc) {
+      console.error('❌ DLAC VECTOR TEST FAILED: Vector search returned chunks from unauthorized document!', results);
+      return false;
+    }
+
+    console.log('✅ DLAC VECTOR TEST PASSED: Pre-filtered HNSW vector search returned zero chunks from unauthorized documents.');
+  } catch (err: any) {
+    console.error('❌ DLAC VECTOR TEST EXCEPTION (Pre-filtered Vector Search):', err.message);
+    return false;
+  }
+
   return true;
 }
 

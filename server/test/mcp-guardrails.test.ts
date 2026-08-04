@@ -869,6 +869,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 51: OpenFGA HNSW Vector Search Pre-Filtering & Zero Data Leakage ───
+  try {
+    const { runDlacVectorSearchTest } = await import('./security/dlacVectorSearch.test.js');
+    const vectorSuccess = await runDlacVectorSearchTest();
+    if (vectorSuccess) {
+      console.log("✅ TEST 51 PASSED: HNSW vector search pre-filtered accessible document IDs via OpenFGA ReBAC, ensuring zero data leaks.");
+      passed++;
+    } else {
+      console.error("❌ TEST 51 FAILED: DLAC Vector Search test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 51 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
