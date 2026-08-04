@@ -2,9 +2,11 @@ import { supabase } from '../config/supabase.js';
 import { dispatchStepExecution } from '../services/integrations/http_adapters.js';
 import { ExecutionPlan, ExecutedStepResult, WorkflowContext } from './types.js';
 import { verifyAnswerGrounding } from '../services/retrieval/groundingGuardrail.js';
+import { selfHealAndRetryCode } from '../services/skills/toolSelfHealer.js';
 
 /**
- * Executor Agent: Sequential runner executing approved steps, resolving variable outputs, and enforcing output grounding.
+ * Executor Agent: Sequential runner executing approved steps, resolving variable outputs,
+ * enforcing output grounding, and performing self-healing sandbox retries on failure.
  */
 export async function executePlan(
   plan: ExecutionPlan,
@@ -32,15 +34,29 @@ export async function executePlan(
     const targetSystem = (step.target_system || 'Slack').toLowerCase();
     const endpointConfig = { base_url: `https://api.${targetSystem}.internal` };
 
-    // 2. Dispatch real HTTP execution via integration adapters
-    const httpRes = await dispatchStepExecution(
+    // 2. Dispatch HTTP execution via integration adapters
+    let httpRes = await dispatchStepExecution(
       targetSystem,
       endpointConfig,
       resolvedParams,
       undefined
     );
 
-    // 3. Grounding Guardrail Check: Verify output claims are grounded in source SOP context
+    // 3. Self-healing Retry Engine: If execution failed, attempt automatic code/parameter repair up to 3 times
+    if (!httpRes.success && step.parameters?.code) {
+      console.warn(`[Executor Agent] Step ${step.step_number} failed. Triggering ToolSelfHealer sandbox recovery...`);
+      const healResult = await selfHealAndRetryCode(step.parameters.code, {}, 3);
+      if (healResult.success) {
+        httpRes = {
+          success: true,
+          status_code: 200,
+          response_data: healResult.output || { message: healResult.stdout || 'Self-healed execution succeeded.' },
+        };
+        console.log(`[Executor Agent] Step ${step.step_number} self-healed successfully after ${healResult.attemptsUsed} attempts.`);
+      }
+    }
+
+    // 4. Grounding Guardrail Check: Verify output claims are grounded in source SOP context
     let finalResponseData = httpRes.response_data;
     if (httpRes.response_data && typeof httpRes.response_data === 'object' && httpRes.response_data.message) {
       const grounding = await verifyAnswerGrounding(httpRes.response_data.message, [
@@ -71,7 +87,7 @@ export async function executePlan(
     results.push(stepResult);
     stepOutputs[step.id] = finalResponseData;
 
-    // 4. Log execution lifecycle to Supabase execution_logs audit table
+    // 5. Log execution lifecycle to Supabase execution_logs audit table
     try {
       await supabase.from('execution_logs').insert({
         sop_id: plan.sop_id || null,
@@ -85,7 +101,7 @@ export async function executePlan(
     }
 
     if (!httpRes.success) {
-      console.error(`[Executor Agent] Step ${step.step_number} failed. Halting workflow execution.`);
+      console.error(`[Executor Agent] Step ${step.step_number} failed after self-healing attempts. Halting workflow execution.`);
       break;
     }
   }

@@ -885,6 +885,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 52: Executor Tool Self-Healer Sandbox Retry Engine ───
+  try {
+    const { runToolSelfHealerTest } = await import('./skills/toolSelfHealer.test.js');
+    const healerSuccess = await runToolSelfHealerTest();
+    if (healerSuccess) {
+      console.log("✅ TEST 52 PASSED: Tool Self-Healer engine automatically repaired script syntax errors, retried sandbox execution, and escalated after 3 attempts.");
+      passed++;
+    } else {
+      console.error("❌ TEST 52 FAILED: Tool Self-Healer test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 52 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
