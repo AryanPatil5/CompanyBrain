@@ -853,6 +853,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 50: Event-Driven Webhook Listeners & HMAC Verification ───
+  try {
+    const { runWebhooksRouteTest } = await import('./routes/webhooks.test.js');
+    const webhookSuccess = await runWebhooksRouteTest();
+    if (webhookSuccess) {
+      console.log("✅ TEST 50 PASSED: Webhook router verified HMAC SHA-256 signatures, ignored stale out-of-order deliveries, and queued payloads in <200ms.");
+      passed++;
+    } else {
+      console.error("❌ TEST 50 FAILED: Webhook route test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 50 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import ingestionRouter from './routes/ingestion.js';
 import sopsRouter from './routes/sops.js';
 import integrationsRouter from './routes/integrations.js';
+import webhooksRouter from './routes/webhooks.js';
 import { startMCPServer } from './services/mcp.js';
 import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
 import { startIngestionWorker, stopIngestionWorker } from './workers/ingestionWorker.js';
@@ -67,6 +68,7 @@ app.use(
 app.use('/api/ingestion', ingestionRouter);
 app.use('/api/sops', sopsRouter);
 app.use('/api/integrations', integrationsRouter);
+app.use('/api/v1/webhooks', webhooksRouter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'Company Brain Backend' });

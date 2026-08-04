@@ -13,7 +13,6 @@ export const redisConnection = new Redis(REDIS_URL, {
 });
 
 redisConnection.on('error', (err) => {
-  // Graceful warning for local development when Redis server is offline
   if ((err as any).code === 'ECONNREFUSED') {
     console.warn(`[IngestionQueue Warning] Redis connection refused at ${REDIS_URL}. Ensure Redis server is running.`);
   } else {
@@ -35,3 +34,4 @@ const queueOptions: QueueOptions = {
 };
 
 export const ingestionQueue = new Queue('IngestionQueue', queueOptions);
+export const webhookIngestionQueue = new Queue('webhook-ingestion', queueOptions);
