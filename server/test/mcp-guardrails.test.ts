@@ -837,6 +837,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 49: Resilient Webhook Ingestion & BullMQ Backoff Controls ───
+  try {
+    const { runIngestionQueueTest } = await import('./workers/ingestionQueue.test.js');
+    const queueSuccess = await runIngestionQueueTest();
+    if (queueSuccess) {
+      console.log("✅ TEST 49 PASSED: BullMQ Ingestion Worker handled 429 Retry-After rate limits, exponential backoff, and DLQ routing.");
+      passed++;
+    } else {
+      console.error("❌ TEST 49 FAILED: Ingestion Queue test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 49 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
