@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { executeSecurely } from './secureSandboxEngine.js';
 
 export interface SandboxExecutionResult {
   stdout: string;
@@ -9,7 +10,7 @@ export interface SandboxExecutionResult {
 
 /**
  * Safely executes untrusted Python or JavaScript/TypeScript code inside a network-isolated, resource-capped Docker sandbox container,
- * with local process fallback for dev/test environments.
+ * or using hardened Isolate execution runner for inline TS/JS tools.
  */
 export async function executeInSandbox(
   code: string,
@@ -18,11 +19,31 @@ export async function executeInSandbox(
 ): Promise<SandboxExecutionResult> {
   const startTime = Date.now();
 
-  const fallbackCmd = language === 'python' ? 'python3' : 'node';
-  const fallbackArgs = language === 'python' ? ['-c', code] : ['-e', code];
+  // If language is JavaScript/TypeScript, execute through hardened Isolate sandbox runner
+  if (language === 'javascript') {
+    try {
+      const res = await executeSecurely(code, {}, timeoutMs);
+      return {
+        stdout: res.stdout || (res.result !== undefined ? String(res.result) : ''),
+        stderr: res.stderr,
+        exitCode: 0,
+        durationMs: res.durationMs,
+      };
+    } catch (err: any) {
+      return {
+        stdout: '',
+        stderr: err.message,
+        exitCode: 1,
+        durationMs: Date.now() - startTime,
+      };
+    }
+  }
 
-  const image = language === 'python' ? 'python:3.11-slim' : 'node:20-alpine';
-  const execCmd = language === 'python' ? ['python3', '-c', code] : ['node', '-e', code];
+  const fallbackCmd = 'python3';
+  const fallbackArgs = ['-c', code];
+
+  const image = 'python:3.11-slim';
+  const execCmd = ['python3', '-c', code];
 
   const dockerArgs = [
     'run',
@@ -66,7 +87,6 @@ export async function executeInSandbox(
           // Process already killed
         }
 
-        // If Docker process timed out due to slow image pulling, fallback to local execution
         if (stderr.includes('Unable to find image') || stderr.includes('Pulling')) {
           const localProc = spawn(fallbackCmd, fallbackArgs);
           let lStdout = '';

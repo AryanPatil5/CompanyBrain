@@ -693,6 +693,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 40: Hardened Isolate Secure Sandbox Execution Engine ───
+  try {
+    const { runSecureSandboxEngineTest } = await import('./skills/secureSandboxEngine.test.js');
+    const secureSandboxSuccess = await runSecureSandboxEngineTest();
+    if (secureSandboxSuccess) {
+      console.log("✅ TEST 40 PASSED: Hardened Isolate Sandbox blocked prototype constructor RCE escapes, enforced 128MB memory caps, and aborted CPU infinite loops.");
+      passed++;
+    } else {
+      console.error("❌ TEST 40 FAILED: Hardened Isolate Sandbox test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 40 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
