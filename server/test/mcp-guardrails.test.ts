@@ -757,6 +757,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 44: GraphRAG Traversal Fusion ───
+  try {
+    const { runGraphFusionTest } = await import('./retrieval/graphFusion.test.js');
+    const graphFusionSuccess = await runGraphFusionTest();
+    if (graphFusionSuccess) {
+      console.log("✅ TEST 44 PASSED: GraphRAG Traversal Fusion extracted query entities, traversed 2-hop Apache AGE graph paths, and enriched hybrid search context.");
+      passed++;
+    } else {
+      console.error("❌ TEST 44 FAILED: GraphRAG Traversal Fusion test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 44 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

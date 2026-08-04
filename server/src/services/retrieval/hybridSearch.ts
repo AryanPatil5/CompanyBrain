@@ -1,10 +1,12 @@
 import { supabase } from '../../config/supabase.js';
 import { generateEmbedding, searchVectorContextDLAC, type DLACSearchResult } from '../embeddings.js';
+import { extractEntitiesAndTraverse } from './graphFusion.js';
 
 export interface HybridSearchResult extends DLACSearchResult {
   rrfScore: number;
   denseRank: number | null;
   sparseRank: number | null;
+  graphContext?: string;
 }
 
 export interface HybridSearchParams {
@@ -17,9 +19,9 @@ export interface HybridSearchParams {
 }
 
 /**
- * Reciprocal Rank Fusion (RRF) Hybrid Search Engine
- * Combines pgvector dense similarity search with PostgreSQL full-text sparse keyword search.
- * Formula: RRF_score(d) = sum(1 / (k + rank_m(d))) for m in {dense, sparse}, where k = 60.
+ * Reciprocal Rank Fusion (RRF) Hybrid Search Engine with GraphRAG Traversal Fusion
+ * Combines pgvector dense similarity search with PostgreSQL full-text sparse keyword search
+ * and enriches top results with 2-hop Apache AGE knowledge graph context.
  */
 export async function hybridSearch(params: HybridSearchParams): Promise<HybridSearchResult[]> {
   const {
@@ -56,7 +58,6 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
   // 2. Parallel Leg 2: Sparse Keyword Retrieval (PostgreSQL FTS / ILIKE)
   const sparsePromise = (async (): Promise<DLACSearchResult[]> => {
     try {
-      // Query database for keyword matches
       const { data: sops, error } = await supabase
         .from('skills_sops')
         .select('id, title, trigger_condition, category, risk_level, requires_human_gate, workspace_id')
@@ -68,7 +69,6 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
         return [];
       }
 
-      // Filter DLAC access for non-admin members
       const isAdmin = role === 'admin';
       const permitted = sops.filter(
         (s) => isAdmin || (!s.requires_human_gate && (s.risk_level === 'Low' || s.risk_level === 'Medium'))
@@ -89,9 +89,16 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
     }
   })();
 
-  const [denseResults, sparseResults] = await Promise.all([densePromise, sparsePromise]);
+  // 3. Parallel Leg 3: GraphRAG 2-Hop Knowledge Graph Traversal
+  const graphPromise = extractEntitiesAndTraverse(cleanQuery, workspaceId);
 
-  // 3. Map RRF Ranks & RRF Score Calculation
+  const [denseResults, sparseResults, graphFusion] = await Promise.all([
+    densePromise,
+    sparsePromise,
+    graphPromise,
+  ]);
+
+  // 4. Map RRF Ranks & RRF Score Calculation
   const rrfMap = new Map<
     string,
     {
@@ -102,7 +109,6 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
     }
   >();
 
-  // Process Dense Ranks
   denseResults.forEach((doc, idx) => {
     const rank = idx + 1;
     const existing = rrfMap.get(doc.id);
@@ -121,7 +127,6 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
     }
   });
 
-  // Process Sparse Ranks
   sparseResults.forEach((doc, idx) => {
     const rank = idx + 1;
     const existing = rrfMap.get(doc.id);
@@ -140,13 +145,14 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
     }
   });
 
-  // 4. Sort merged candidates by RRF Score descending
+  // 5. Sort merged candidates by RRF Score descending
   const merged: HybridSearchResult[] = Array.from(rrfMap.values())
     .map(({ doc, denseRank, sparseRank, rrfScore }) => ({
       ...doc,
       denseRank,
       sparseRank,
       rrfScore,
+      graphContext: graphFusion.graphContextText || undefined,
     }))
     .sort((a, b) => b.rrfScore - a.rrfScore)
     .slice(0, limit);
