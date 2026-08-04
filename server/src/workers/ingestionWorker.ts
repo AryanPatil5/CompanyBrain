@@ -78,22 +78,22 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
 
       switch (job_name) {
         case 'crawl_slack': {
-          result = await crawlSlackHistory();
+          result = await crawlSlackHistory(process.env.SLACK_INCIDENT_CHANNEL_ID || 'C0123456789', workspace_id);
           await job.updateProgress(100);
           break;
         }
         case 'crawl_github': {
-          result = await crawlGithubPostMortems();
+          result = await crawlGithubPostMortems(process.env.GITHUB_REPO || 'owner/repo', workspace_id);
           await job.updateProgress(100);
           break;
         }
         case 'crawl_linear': {
-          result = await crawlLinearIncidents();
+          result = await crawlLinearIncidents(workspace_id);
           await job.updateProgress(100);
           break;
         }
         case 'crawl_zendesk': {
-          result = await crawlZendeskTickets();
+          result = await crawlZendeskTickets(workspace_id);
           await job.updateProgress(100);
           break;
         }
@@ -104,21 +104,21 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
           break;
         }
         case 'crawl_db': {
-          result = await crawlDatabaseLogs();
+          result = await crawlDatabaseLogs(workspace_id);
           await job.updateProgress(100);
           break;
         }
         case 'all': {
           await job.updateProgress(20);
-          const slack = await crawlSlackHistory();
+          const slack = await crawlSlackHistory(process.env.SLACK_INCIDENT_CHANNEL_ID || 'C0123456789', workspace_id);
           await job.updateProgress(40);
-          const github = await crawlGithubPostMortems();
+          const github = await crawlGithubPostMortems(process.env.GITHUB_REPO || 'owner/repo', workspace_id);
           await job.updateProgress(60);
-          const linear = await crawlLinearIncidents();
+          const linear = await crawlLinearIncidents(workspace_id);
           await job.updateProgress(80);
-          const zendesk = await crawlZendeskTickets();
+          const zendesk = await crawlZendeskTickets(workspace_id);
           const email = await crawlEmailInbox(inbox || 'ops-support@company.com', workspace_id);
-          const db = await crawlDatabaseLogs();
+          const db = await crawlDatabaseLogs(workspace_id);
           await job.updateProgress(100);
           result = { slack, github, linear, zendesk, email, db };
           break;

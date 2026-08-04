@@ -83,15 +83,27 @@ export async function searchVectorContextDLAC(params: {
 }
 
 async function fallbackInMemoryDLACSearch(
-  _queryEmbedding: number[],
+  queryEmbedding: number[],
   workspaceId: string,
   _userId: string,
   role: string,
   allowedDocIds: string[] | null,
-  _matchThreshold: number,
+  matchThreshold: number,
   matchCount: number
 ): Promise<DLACSearchResult[]> {
   try {
+    const chunkResults = await fallbackChunkSearch(queryEmbedding, workspaceId, role, allowedDocIds, matchThreshold, matchCount);
+    if (chunkResults.length > 0 || (allowedDocIds !== null && allowedDocIds.length === 0)) {
+      if (chunkResults.length > 0) {
+        console.log(`[Retrieval] Retrieved ${chunkResults.length} chunks from document_chunks (workspace: ${workspaceId})`);
+      }
+      return chunkResults;
+    }
+
+    console.warn(
+      `[Retrieval] No chunks found; falling back to skills_sops (workspace: ${workspaceId}, role: ${role}, allowedDocIds: ${allowedDocIds})`
+    );
+
     const { data: sops } = await supabase
       .from('skills_sops')
       .select('id, title, trigger_condition, category, risk_level, requires_human_gate, embedding, workspace_id')
@@ -109,6 +121,8 @@ async function fallbackInMemoryDLACSearch(
       return !s.requires_human_gate && (s.risk_level === 'Low' || s.risk_level === 'Medium');
     });
 
+    console.log(`[Retrieval] Retrieved ${filtered.length} SOPs from skills_sops fallback`);
+
     return filtered.slice(0, matchCount).map((s, idx) => ({
       id: s.id,
       title: s.title,
@@ -120,6 +134,90 @@ async function fallbackInMemoryDLACSearch(
       source_document_id: s.id,
     }));
   } catch (err) {
+    console.error('[Retrieval Error] Fallback search failed:', err);
     return [];
   }
+}
+
+function parseVector(value: unknown): number[] {
+  if (Array.isArray(value)) {
+    return value.map(Number).filter((n) => Number.isFinite(n));
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map((n) => Number(n.trim()))
+      .filter((n) => Number.isFinite(n));
+  }
+
+  return [];
+}
+
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (!vecA.length || vecA.length !== vecB.length) return 0;
+
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dot += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+async function fallbackChunkSearch(
+  queryEmbedding: number[],
+  workspaceId: string,
+  role: string,
+  allowedDocIds: string[] | null,
+  matchThreshold: number,
+  matchCount: number
+): Promise<DLACSearchResult[]> {
+  const isAdmin = role === 'admin';
+
+  if (!isAdmin && allowedDocIds !== null && allowedDocIds.length === 0) {
+    return [];
+  }
+
+  let query = supabase
+    .from('document_chunks')
+    .select('id, source_document_id, content, metadata, embedding, allowed_roles, workspace_id')
+    .eq('workspace_id', workspaceId)
+    .not('embedding', 'is', null)
+    .limit(Math.max(matchCount * 5, 25));
+
+  if (!isAdmin && allowedDocIds !== null) {
+    query = query.in('source_document_id', allowedDocIds);
+  }
+
+  const { data: chunks, error } = await query;
+  if (error || !Array.isArray(chunks)) {
+    return [];
+  }
+
+  return chunks
+    .map((chunk: any) => {
+      const embedding = parseVector(chunk.embedding);
+      const similarity = cosineSimilarity(queryEmbedding, embedding);
+      const metadata = chunk.metadata || {};
+      return {
+        id: chunk.id,
+        title: metadata.title || 'Source Document Chunk',
+        trigger_condition: chunk.content,
+        category: metadata.category || 'Operations',
+        risk_level: metadata.risk_level || 'Low',
+        requires_human_gate: Boolean(metadata.requires_human_gate),
+        similarity,
+        source_document_id: chunk.source_document_id,
+      } satisfies DLACSearchResult;
+    })
+    .filter((item) => item.similarity >= matchThreshold)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, matchCount);
 }

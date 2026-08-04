@@ -59,13 +59,14 @@ export async function processSlackThreadCandidates(threads: SlackThread[]): Prom
   return threads.filter(isSOPCandidateSlackThread);
 }
 
-async function isSlackThreadCrawled(threadTs: string): Promise<boolean> {
+async function isSlackThreadCrawled(threadTs: string, workspaceId: string): Promise<boolean> {
   try {
     const { data } = await supabase
       .from('crawled_sources')
       .select('id')
       .eq('source', 'slack')
       .eq('external_id', threadTs)
+      .eq('workspace_id', workspaceId)
       .single();
     return !!data;
   } catch {
@@ -73,7 +74,9 @@ async function isSlackThreadCrawled(threadTs: string): Promise<boolean> {
   }
 }
 
-async function markSlackThreadCrawledBatch(entries: Array<{ source: string; external_id: string; target: string }>): Promise<void> {
+async function markSlackThreadCrawledBatch(
+  entries: Array<{ source: string; external_id: string; target: string; workspace_id: string }>
+): Promise<void> {
   if (entries.length === 0) return;
   try {
     await supabase.from('crawled_sources').insert(entries);
@@ -146,7 +149,7 @@ export async function crawlSlackHistory(
   let sopsExtracted = 0;
 
   try {
-    const deduplicationBatch: Array<{ source: string; external_id: string; target: string }> = [];
+    const deduplicationBatch: Array<{ source: string; external_id: string; target: string; workspace_id: string }> = [];
 
     for await (const messageBatch of fetchSlackMessagesStream(channelId)) {
       const parentMessages = messageBatch.filter((m) => m.reply_count && m.reply_count >= 3);
@@ -154,7 +157,7 @@ export async function crawlSlackHistory(
       for (const parent of parentMessages) {
         const threadTs = `slack_${channelId}_${parent.ts}`;
 
-        if (await isSlackThreadCrawled(threadTs)) continue;
+        if (await isSlackThreadCrawled(threadTs, workspaceId)) continue;
         threadsCrawled++;
 
         let threadMessages: SlackMessage[] = [];
@@ -192,7 +195,7 @@ export async function crawlSlackHistory(
         };
 
         if (!isSOPCandidateSlackThread(threadObj)) {
-          deduplicationBatch.push({ source: 'slack', external_id: threadTs, target: channelId });
+          deduplicationBatch.push({ source: 'slack', external_id: threadTs, target: channelId, workspace_id: workspaceId });
           continue;
         }
 
@@ -233,7 +236,7 @@ export async function crawlSlackHistory(
           console.warn(`[WARN] [Slack Crawler] Extraction skipped for thread ${parent.ts}:`, (extractErr as Error).message);
         }
 
-        deduplicationBatch.push({ source: 'slack', external_id: threadTs, target: channelId });
+        deduplicationBatch.push({ source: 'slack', external_id: threadTs, target: channelId, workspace_id: workspaceId });
 
         if (deduplicationBatch.length >= 100) {
           await markSlackThreadCrawledBatch(deduplicationBatch);

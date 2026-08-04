@@ -27,6 +27,7 @@ import { getTenantClient } from '../middleware/tenantClient.js';
 import { ingestionLimiter, webhookLimiter } from '../middleware/rateLimiter.js';
 import { ingestionQueue } from '../queue/ingestionQueue.js';
 import { type IngestionJobData } from '../workers/ingestionWorker.js';
+import { formatMessagesAsTranscript, persistSourceDocumentWithChunks } from '../ingestion/sourceObjects.js';
 
 const router = Router();
 
@@ -60,6 +61,21 @@ async function processThread(
     res.status(500).json({ error: 'Database storage error for raw thread.' });
     return;
   }
+
+  const sourceDocument = await persistSourceDocumentWithChunks({
+    workspaceId: workspace_id,
+    source,
+    externalId: external_thread_id,
+    title: `${source}:${channel_or_project}:${external_thread_id}`,
+    text: formatMessagesAsTranscript(messages),
+    rawThreadId: rawThread.id,
+    metadata: {
+      channel_or_project,
+      message_count: messages.length,
+      source_trust: sourceTrust,
+    },
+    client,
+  });
 
   // Extract SOP via LLM with error handling and sourceTrust parameter
   let extractedSOP;
@@ -124,6 +140,7 @@ async function processThread(
     execution_steps: extractedSOP.execution_steps,
     risk_level: extractedSOP.risk_level || 'Low',
     requires_human_gate: extractedSOP.requires_human_gate || false,
+    source_doc_id: sourceDocument?.id || rawThread.id,
     status: 'Draft',
     version: 1,
     last_confirmed_at: new Date().toISOString(),

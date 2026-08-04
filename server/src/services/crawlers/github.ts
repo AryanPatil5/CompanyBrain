@@ -17,13 +17,14 @@ export interface GitHubIssueCrawlResult {
   status: 'success' | 'skipped' | 'error';
 }
 
-async function isGitHubIssueCrawled(issueGlobalId: string): Promise<boolean> {
+async function isGitHubIssueCrawled(issueGlobalId: string, workspaceId: string): Promise<boolean> {
   try {
     const { data } = await supabase
       .from('crawled_sources')
       .select('id')
       .eq('source', 'github')
       .eq('external_id', issueGlobalId)
+      .eq('workspace_id', workspaceId)
       .single();
     return !!data;
   } catch {
@@ -31,7 +32,7 @@ async function isGitHubIssueCrawled(issueGlobalId: string): Promise<boolean> {
   }
 }
 
-async function markGitHubIssueCrawledBatch(entries: Array<{ source: string; external_id: string; target: string }>): Promise<void> {
+async function markGitHubIssueCrawledBatch(entries: Array<{ source: string; external_id: string; target: string; workspace_id: string }>): Promise<void> {
   if (entries.length === 0) return;
   try {
     await supabase.from('crawled_sources').insert(entries);
@@ -107,13 +108,13 @@ export async function crawlGithubPostMortems(
       return { source: 'github', repo, issues_crawled: 0, sops_extracted: 0, status: 'error' };
     }
 
-    const deduplicationBatch: Array<{ source: string; external_id: string; target: string }> = [];
+    const deduplicationBatch: Array<{ source: string; external_id: string; target: string; workspace_id: string }> = [];
 
     for await (const issueBatch of fetchGitHubIssuesStream(owner, repoName)) {
       for (const issue of issueBatch) {
         const issueId = `github_${repo}_${issue.number}`;
 
-        if (await isGitHubIssueCrawled(issueId)) continue;
+        if (await isGitHubIssueCrawled(issueId, workspaceId)) continue;
         issuesCrawled++;
 
         let commentsText = '';
@@ -180,7 +181,7 @@ export async function crawlGithubPostMortems(
           console.warn(`[WARN] [GitHub Crawler] Extraction skipped for issue #${issue.number}:`, (extractErr as Error).message);
         }
 
-        deduplicationBatch.push({ source: 'github', external_id: issueId, target: repo });
+        deduplicationBatch.push({ source: 'github', external_id: issueId, target: repo, workspace_id: workspaceId });
 
         // Batch database writes in chunks of 100 records
         if (deduplicationBatch.length >= 100) {

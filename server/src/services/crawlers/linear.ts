@@ -18,13 +18,14 @@ export interface LinearCrawlResult {
 /**
  * Checks if a Linear issue ID has already been processed in `crawled_sources`.
  */
-async function isLinearIssueCrawled(linearIssueId: string): Promise<boolean> {
+async function isLinearIssueCrawled(linearIssueId: string, workspaceId: string): Promise<boolean> {
   try {
     const { data } = await supabase
       .from('crawled_sources')
       .select('id')
       .eq('source', 'linear')
       .eq('external_id', linearIssueId)
+      .eq('workspace_id', workspaceId)
       .single();
     return !!data;
   } catch {
@@ -35,12 +36,13 @@ async function isLinearIssueCrawled(linearIssueId: string): Promise<boolean> {
 /**
  * Marks a Linear issue ID as processed in `crawled_sources`.
  */
-async function markLinearIssueCrawled(linearIssueId: string, teamKey?: string): Promise<void> {
+async function markLinearIssueCrawled(linearIssueId: string, workspaceId: string, teamKey?: string): Promise<void> {
   try {
     await supabase.from('crawled_sources').insert({
       source: 'linear',
       external_id: linearIssueId,
       target: teamKey || 'all_teams',
+      workspace_id: workspaceId,
     });
   } catch (err) {
     console.warn('[Linear Crawler] Failed to record deduplication entry:', err);
@@ -123,7 +125,7 @@ export async function crawlLinearIncidents(
       const issueId = `linear_${issue.id || issue.identifier}`;
 
       // Deduplication check
-      if (await isLinearIssueCrawled(issueId)) {
+      if (await isLinearIssueCrawled(issueId, workspaceId)) {
         continue;
       }
 
@@ -183,7 +185,7 @@ export async function crawlLinearIncidents(
       }
 
       // Mark as processed in deduplication table
-      await markLinearIssueCrawled(issueId, issue.team?.key);
+      await markLinearIssueCrawled(issueId, workspaceId, issue.team?.key);
     }
 
     return { source: 'linear', issues_crawled: issuesCrawled, sops_extracted: sopsExtracted, status: 'success' };

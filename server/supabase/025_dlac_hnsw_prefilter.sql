@@ -32,8 +32,9 @@ begin
   where d.workspace_id = workspace_id_filter
     and (1 - (d.embedding <=> query_embedding)) > match_threshold
     and (
+      -- NULL means unrestricted admin/system access. An empty array means
+      -- the caller has no explicit document grants and must not see chunks.
       allowed_doc_ids is null
-      or cardinality(allowed_doc_ids) = 0
       or d.source_document_id = any(allowed_doc_ids)
     )
   order by d.embedding <=> query_embedding
