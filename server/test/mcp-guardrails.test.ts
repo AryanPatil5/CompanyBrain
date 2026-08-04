@@ -949,6 +949,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 56: Automated OpenAPI / Swagger Tool Synthesis Engine ───
+  try {
+    const { runOpenApiAutoDiscovererTest } = await import('./skills/openApiAutoDiscoverer.test.js');
+    const discoverSuccess = await runOpenApiAutoDiscovererTest();
+    if (discoverSuccess) {
+      console.log("✅ TEST 56 PASSED: OpenAPI Auto-Discoverer compiled Swagger endpoints into executable FastMCP tools and registered them in tool_registry.");
+      passed++;
+    } else {
+      console.error("❌ TEST 56 FAILED: OpenAPI Auto-Discoverer test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 56 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

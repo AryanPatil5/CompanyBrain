@@ -7,6 +7,7 @@ import { hybridSearch } from '../services/retrieval/hybridSearch.js';
 import { runWorkflow } from '../agents/orchestrator.js';
 import { getConnectedEntities } from '../services/graph/graphService.js';
 import { compileSopToAst, validateSopAst } from '../services/skills/sopCompiler.js';
+import { discoverAndSynthesizeToolsFromSpec } from '../services/skills/openApiAutoDiscoverer.js';
 
 const router = Router();
 
@@ -490,6 +491,24 @@ router.post('/compile', async (req: Request, res: Response): Promise<void> => {
     });
   } catch (err: any) {
     res.status(500).json({ error: `SOP compilation failed: ${err.message}` });
+  }
+});
+
+router.post('/auto-discover-tools', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id || '00000000-0000-0000-0000-000000000000';
+    const { specUrl, specJson } = req.body;
+
+    if (!specUrl && !specJson) {
+      res.status(400).json({ error: 'Either "specUrl" or "specJson" is required.' });
+      return;
+    }
+
+    const result = await discoverAndSynthesizeToolsFromSpec(specUrl || specJson, workspaceId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: `Tool auto-discovery failed: ${err.message}` });
   }
 });
 
