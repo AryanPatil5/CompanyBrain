@@ -821,6 +821,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 48: DLAC Graph Fusion Access Control ───
+  try {
+    const { runDlacGraphFusionTest } = await import('./graph/dlacGraphFusion.test.js');
+    const dlacGraphSuccess = await runDlacGraphFusionTest();
+    if (dlacGraphSuccess) {
+      console.log("✅ TEST 48 PASSED: DLAC Graph Fusion filtered graph nodes and edges based on user roles, hiding restricted HR document nodes from non-admin members.");
+      passed++;
+    } else {
+      console.error("❌ TEST 48 FAILED: DLAC Graph Fusion test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 48 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

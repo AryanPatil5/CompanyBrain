@@ -1,6 +1,6 @@
 import { supabase } from '../../config/supabase.js';
 import { getConnectedEntities, executeCypher } from '../graph/graphService.js';
-import { ENTERPRISE_ALIAS_DICTIONARY, canonicalizeEntity } from '../graph/entityDisambiguator.js';
+import { canonicalizeEntity } from '../graph/entityDisambiguator.js';
 
 export interface GraphFusionResult {
   graphContextText: string;
@@ -8,21 +8,38 @@ export interface GraphFusionResult {
   entityCount: number;
 }
 
+export interface GraphFusionUserContext {
+  userId?: string;
+  workspaceId: string;
+  userRole?: string;
+  roles?: string[];
+}
+
 /**
- * GraphRAG Traversal Fusion Service
+ * GraphRAG Traversal Fusion Service with Document-Level Access Control (DLAC)
  * Extracts named entities from user query, traverses 2-hop graph paths in Apache AGE / pg graph,
- * and formats relational entity tuples into structured context text for hybrid search RAG.
+ * and filters out restricted nodes/relationships before constructing context text.
  */
 export async function extractEntitiesAndTraverse(
   queryText: string,
-  workspaceId: string
+  workspaceIdOrContext: string | GraphFusionUserContext,
+  roleOption?: string
 ): Promise<GraphFusionResult> {
+  const workspaceId =
+    typeof workspaceIdOrContext === 'string'
+      ? workspaceIdOrContext
+      : workspaceIdOrContext.workspaceId;
+
+  const userRole =
+    typeof workspaceIdOrContext === 'object'
+      ? workspaceIdOrContext.userRole || 'member'
+      : roleOption || 'member';
+
   const cleanQuery = queryText.toLowerCase().trim();
   if (!cleanQuery) {
     return { graphContextText: '', graphNodes: [], entityCount: 0 };
   }
 
-  const startTime = Date.now();
   const matchedNodeIds = new Set<string>();
 
   // 1. Check dictionary aliases
@@ -31,16 +48,21 @@ export async function extractEntitiesAndTraverse(
     matchedNodeIds.add(canonical);
   }
 
-  // 2. Extract entity candidate nodes from database graph_nodes table
+  // 2. Extract entity candidate nodes from database graph_nodes table with DLAC permissions
   try {
     const { data: dbNodes } = await supabase
       .from('graph_nodes')
-      .select('id, name, label')
+      .select('id, name, label, allowed_roles')
       .eq('workspace_id', workspaceId)
       .limit(50);
 
     if (Array.isArray(dbNodes)) {
+      const isAdmin = userRole === 'admin';
       for (const node of dbNodes) {
+        if (!isAdmin && node.allowed_roles && !node.allowed_roles.includes(userRole)) {
+          continue; // Skip restricted node
+        }
+
         const nodeNameLower = (node.name || '').toLowerCase();
         const nodeIdLower = (node.id || '').toLowerCase();
         if (
@@ -60,32 +82,16 @@ export async function extractEntitiesAndTraverse(
     return { graphContextText: '', graphNodes: [], entityCount: 0 };
   }
 
-  // 3. Execute 2-hop Cypher / Graph traversal for matched entities
+  // 3. Execute DLAC-permissioned 2-hop Cypher / Graph traversal for matched entities
   const graphTuples: string[] = [];
   const fetchedNodes: any[] = [];
 
   for (const entityId of Array.from(matchedNodeIds).slice(0, 3)) {
     try {
-      // Execute 2-hop Cypher traversal with LIMIT 25
-      const cypherQuery = `
-        MATCH (e {id: '${entityId}'})-[r1]-(n1)-[r2*0..1]-(n2)
-        RETURN e.id AS source, type(r1) AS rel1, n1.id AS hop1, type(r2) AS rel2, n2.id AS hop2
-        LIMIT 25
-      `;
-      const cypherResults = await executeCypher(cypherQuery);
-
-      if (Array.isArray(cypherResults) && cypherResults.length > 0) {
-        for (const row of cypherResults.slice(0, 25)) {
-          const pathStr = `(${row.source}) -> [${row.rel1 || 'CONNECTED'}] -> (${row.hop1})${row.rel2 ? ` -> [${row.rel2}] -> (${row.hop2})` : ''}`;
-          graphTuples.push(pathStr);
-        }
-      } else {
-        // Fallback to graphService.getConnectedEntities()
-        const connected = await getConnectedEntities(entityId, 2);
-        for (const c of connected.slice(0, 25)) {
-          graphTuples.push(`(${entityId}) -> [${c.relationship}] -> (${c.node.name || c.entityId}) [Depth: ${c.depth}]`);
-          fetchedNodes.push(c.node);
-        }
+      const connected = await getConnectedEntities(entityId, 2, { userRole, workspaceId });
+      for (const c of connected.slice(0, 25)) {
+        graphTuples.push(`(${entityId}) -> [${c.relationship}] -> (${c.node.name || c.entityId})`);
+        fetchedNodes.push(c.node);
       }
     } catch (err) {
       console.warn(`[GraphFusion Warning] Traversal failed for entity "${entityId}":`, err);

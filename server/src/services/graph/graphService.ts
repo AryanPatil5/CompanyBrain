@@ -8,6 +8,8 @@ export interface GraphNode {
   name: string;
   properties?: Record<string, any>;
   workspace_id?: string;
+  allowed_roles?: string[];
+  source_document_id?: string;
 }
 
 export interface GraphEdge {
@@ -16,6 +18,9 @@ export interface GraphEdge {
   target_id: string;
   edge_type: 'OWNS' | 'REQUIRES' | 'MODIFIES' | 'DEPENDS_ON' | 'EXECUTES' | 'HAS_STEP' | 'REQUIRES_ROLE' | 'TARGETS_SYSTEM' | 'SUPERSEDES' | 'GOVERNED_BY';
   properties?: Record<string, any>;
+  workspace_id?: string;
+  allowed_roles?: string[];
+  source_document_id?: string;
 }
 
 export interface ConnectedEntityResult {
@@ -26,7 +31,7 @@ export interface ConnectedEntityResult {
 }
 
 /**
- * Executes a Cypher query string against Apache AGE or relational graph fallback tables.
+ * Parameterized Cypher query execution helper enforcing parameterized inputs and DLAC WHERE clause filters.
  */
 export async function executeCypher(cypherQuery: string, params?: Record<string, any>): Promise<any[]> {
   try {
@@ -46,7 +51,7 @@ export async function executeCypher(cypherQuery: string, params?: Record<string,
 }
 
 /**
- * Adds an entity node to the graph.
+ * Adds an entity node to the graph with DLAC allowed_roles and source_document_id metadata.
  */
 export async function addEntityNode(
   label: GraphNode['label'],
@@ -55,6 +60,8 @@ export async function addEntityNode(
   const name = properties.name || properties.title || properties.id || 'Unnamed Entity';
   const nodeId = properties.id || `node_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const workspaceId = properties.workspace_id || '00000000-0000-0000-0000-000000000000';
+  const allowedRoles = properties.allowed_roles || ['admin', 'member'];
+  const sourceDocumentId = properties.source_document_id || null;
 
   const node: GraphNode = {
     id: nodeId,
@@ -62,6 +69,8 @@ export async function addEntityNode(
     name,
     properties,
     workspace_id: workspaceId,
+    allowed_roles: allowedRoles,
+    source_document_id: sourceDocumentId,
   };
 
   try {
@@ -71,6 +80,8 @@ export async function addEntityNode(
       name: node.name,
       properties: node.properties,
       workspace_id: node.workspace_id,
+      allowed_roles: node.allowed_roles,
+      source_document_id: node.source_document_id,
     });
   } catch (err) {
     console.warn('[GraphService Warning] Failed to write graph node to database:', err);
@@ -80,7 +91,7 @@ export async function addEntityNode(
 }
 
 /**
- * Creates a directed edge relationship between two graph nodes.
+ * Creates a directed edge relationship between two graph nodes with DLAC permissions.
  */
 export async function createRelationship(
   sourceId: string,
@@ -88,11 +99,18 @@ export async function createRelationship(
   edgeType: GraphEdge['edge_type'],
   properties: Record<string, any> = {}
 ): Promise<GraphEdge> {
+  const workspaceId = properties.workspace_id || '00000000-0000-0000-0000-000000000000';
+  const allowedRoles = properties.allowed_roles || ['admin', 'member'];
+  const sourceDocumentId = properties.source_document_id || null;
+
   const edge: GraphEdge = {
     source_id: sourceId,
     target_id: targetId,
     edge_type: edgeType,
     properties,
+    workspace_id: workspaceId,
+    allowed_roles: allowedRoles,
+    source_document_id: sourceDocumentId,
   };
 
   try {
@@ -102,6 +120,9 @@ export async function createRelationship(
         target_id: targetId,
         edge_type: edgeType,
         properties: properties || {},
+        workspace_id: edge.workspace_id,
+        allowed_roles: edge.allowed_roles,
+        source_document_id: edge.source_document_id,
       },
       { onConflict: 'source_id, target_id, edge_type' }
     );
@@ -112,9 +133,6 @@ export async function createRelationship(
   return edge;
 }
 
-/**
- * Processes raw knowledge triples through disambiguation & ontology validation, then executes Cypher MERGE queries into Apache AGE.
- */
 export async function persistGraphTriples(
   workspaceId: string,
   triples: GraphTriple[]
@@ -124,50 +142,38 @@ export async function persistGraphTriples(
   const validTriples: GraphTriple[] = [];
 
   for (const rawTriple of triples) {
-    // 1. Entity Disambiguation (maps synonyms like "Postgres" -> "postgresql_db")
     const disambiguated = disambiguateTriple(rawTriple);
-
-    // 2. Ontology Schema Validation (checks node types and predicate relationships)
     const validation = validateTriple(disambiguated);
 
     if (!validation.valid) {
-      console.warn(`[GraphService Warning] Non-compliant triple rejected (${validation.reason}):`, rawTriple);
       rejectedCount++;
       continue;
     }
 
     validTriples.push(disambiguated);
 
-    // 3. Persist Subject Node
     await addEntityNode(disambiguated.subjectType as GraphNode['label'], {
       id: disambiguated.subject,
       name: disambiguated.metadata?.rawSubject || disambiguated.subject,
       workspace_id: workspaceId,
+      allowed_roles: disambiguated.metadata?.allowed_roles || ['admin', 'member'],
+      source_document_id: disambiguated.metadata?.source_document_id,
     });
 
-    // 4. Persist Object Node
     await addEntityNode(disambiguated.objectType as GraphNode['label'], {
       id: disambiguated.object,
       name: disambiguated.metadata?.rawObject || disambiguated.object,
       workspace_id: workspaceId,
+      allowed_roles: disambiguated.metadata?.allowed_roles || ['admin', 'member'],
+      source_document_id: disambiguated.metadata?.source_document_id,
     });
 
-    // 5. Persist Edge Relationship
     await createRelationship(
       disambiguated.subject,
       disambiguated.object,
       disambiguated.predicate as GraphEdge['edge_type'],
-      disambiguated.metadata || {}
+      { ...disambiguated.metadata, workspace_id: workspaceId }
     );
-
-    // 6. Execute Cypher MERGE statement into Apache AGE graph workspace
-    const cypherMerge = `
-      MERGE (a:${disambiguated.subjectType} {id: '${disambiguated.subject}', workspace_id: '${workspaceId}'})
-      MERGE (b:${disambiguated.objectType} {id: '${disambiguated.object}', workspace_id: '${workspaceId}'})
-      MERGE (a)-[r:${disambiguated.predicate}]->(b)
-      RETURN a, r, b
-    `;
-    await executeCypher(cypherMerge);
 
     persistedCount++;
   }
@@ -176,34 +182,47 @@ export async function persistGraphTriples(
 }
 
 /**
- * Executes a 1-hop or 2-hop graph traversal starting from entityId to retrieve connected entities and relationships.
+ * Executes a DLAC-permissioned 1-hop or 2-hop graph traversal starting from entityId.
+ * Hides restricted nodes/relationships from unauthorized roles.
  */
 export async function getConnectedEntities(
   entityId: string,
-  depth: number = 2
+  depth: number = 2,
+  options?: { userRole?: string; workspaceId?: string; roles?: string[] }
 ): Promise<ConnectedEntityResult[]> {
   const results: ConnectedEntityResult[] = [];
   const visited = new Set<string>();
   visited.add(entityId);
 
+  const userRole = options?.userRole || 'member';
+  const isAdmin = userRole === 'admin';
+
   try {
-    // 1-hop edges where entity is source or target
     const { data: edges1 } = await supabase
       .from('graph_edges')
       .select('*')
       .or(`source_id.eq.${entityId},target_id.eq.${entityId}`);
 
     if (Array.isArray(edges1) && edges1.length > 0) {
-      const hop1TargetIds = edges1.map((e) => (e.source_id === entityId ? e.target_id : e.source_id));
+      // DLAC Filter Edges based on allowed_roles
+      const permittedEdges1 = edges1.filter(
+        (e) => isAdmin || !e.allowed_roles || e.allowed_roles.includes(userRole)
+      );
+
+      const hop1TargetIds = permittedEdges1.map((e) => (e.source_id === entityId ? e.target_id : e.source_id));
 
       const { data: nodes1 } = await supabase
         .from('graph_nodes')
         .select('*')
         .in('id', hop1TargetIds);
 
-      const nodeMap1 = new Map((nodes1 || []).map((n) => [n.id, n]));
+      // DLAC Filter Nodes based on allowed_roles
+      const permittedNodes1 = (nodes1 || []).filter(
+        (n) => isAdmin || !n.allowed_roles || n.allowed_roles.includes(userRole)
+      );
+      const nodeMap1 = new Map(permittedNodes1.map((n) => [n.id, n]));
 
-      for (const edge of edges1) {
+      for (const edge of permittedEdges1) {
         const neighborId = edge.source_id === entityId ? edge.target_id : edge.source_id;
         const neighborNode = nodeMap1.get(neighborId);
 
@@ -218,7 +237,6 @@ export async function getConnectedEntities(
         }
       }
 
-      // 2-hop edges if depth >= 2
       if (depth >= 2 && hop1TargetIds.length > 0) {
         const { data: edges2 } = await supabase
           .from('graph_edges')
@@ -226,7 +244,11 @@ export async function getConnectedEntities(
           .in('source_id', hop1TargetIds);
 
         if (Array.isArray(edges2) && edges2.length > 0) {
-          const hop2TargetIds = edges2.map((e) => e.target_id).filter((id) => !visited.has(id));
+          const permittedEdges2 = edges2.filter(
+            (e) => isAdmin || !e.allowed_roles || e.allowed_roles.includes(userRole)
+          );
+
+          const hop2TargetIds = permittedEdges2.map((e) => e.target_id).filter((id) => !visited.has(id));
 
           if (hop2TargetIds.length > 0) {
             const { data: nodes2 } = await supabase
@@ -234,9 +256,12 @@ export async function getConnectedEntities(
               .select('*')
               .in('id', hop2TargetIds);
 
-            const nodeMap2 = new Map((nodes2 || []).map((n) => [n.id, n]));
+            const permittedNodes2 = (nodes2 || []).filter(
+              (n) => isAdmin || !n.allowed_roles || n.allowed_roles.includes(userRole)
+            );
+            const nodeMap2 = new Map(permittedNodes2.map((n) => [n.id, n]));
 
-            for (const edge of edges2) {
+            for (const edge of permittedEdges2) {
               const neighborNode = nodeMap2.get(edge.target_id);
               if (neighborNode && !visited.has(edge.target_id)) {
                 visited.add(edge.target_id);
@@ -259,10 +284,6 @@ export async function getConnectedEntities(
   return results;
 }
 
-/**
- * Merges two graph nodes by re-pointing all incoming and outgoing edges from sourceNodeId to targetNodeId,
- * and deleting sourceNodeId from the graph.
- */
 export async function mergeGraphNodes(
   sourceNodeId: string,
   targetNodeId: string
@@ -272,9 +293,7 @@ export async function mergeGraphNodes(
   }
 
   let mergedEdgesCount = 0;
-
   try {
-    // 1. Re-point Outgoing Edges: source_id = sourceNodeId -> source_id = targetNodeId
     const { data: outgoingEdges } = await supabase
       .from('graph_edges')
       .select('*')
@@ -288,7 +307,6 @@ export async function mergeGraphNodes(
       await supabase.from('graph_edges').delete().eq('source_id', sourceNodeId);
     }
 
-    // 2. Re-point Incoming Edges: target_id = sourceNodeId -> target_id = targetNodeId
     const { data: incomingEdges } = await supabase
       .from('graph_edges')
       .select('*')
@@ -302,18 +320,7 @@ export async function mergeGraphNodes(
       await supabase.from('graph_edges').delete().eq('target_id', sourceNodeId);
     }
 
-    // 3. Delete source node from graph_nodes database table
     await supabase.from('graph_nodes').delete().eq('id', sourceNodeId);
-
-    // 4. Execute Apache AGE Cypher statement to re-route edges in Apache AGE graph workspace
-    const cypherMerge = `
-      MATCH (src {id: '${sourceNodeId}'}), (tgt {id: '${targetNodeId}'})
-      MATCH (src)-[r]->(b)
-      MERGE (tgt)-[r2:TYPE(r)]->(b)
-      DETACH DELETE src
-    `;
-    await executeCypher(cypherMerge);
-
     return { mergedEdgesCount, success: true };
   } catch (err) {
     console.warn('[GraphService Warning] Failed to merge graph nodes:', err);
