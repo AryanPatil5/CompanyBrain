@@ -773,6 +773,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 45: Cross-Encoder Reranker & Output Grounding Guardrail ───
+  try {
+    const { runGroundingGuardrailTest } = await import('./retrieval/groundingGuardrail.test.js');
+    const groundingSuccess = await runGroundingGuardrailTest();
+    if (groundingSuccess) {
+      console.log("✅ TEST 45 PASSED: Cross-encoder reranker refined top-30 candidate chunks and Grounding Guardrail intercepted ungrounded hallucinated claims.");
+      passed++;
+    } else {
+      console.error("❌ TEST 45 FAILED: Grounding Guardrail test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 45 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

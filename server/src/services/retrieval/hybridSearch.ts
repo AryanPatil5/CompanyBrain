@@ -1,6 +1,7 @@
 import { supabase } from '../../config/supabase.js';
 import { generateEmbedding, searchVectorContextDLAC, type DLACSearchResult } from '../embeddings.js';
 import { extractEntitiesAndTraverse } from './graphFusion.js';
+import { rerankResults } from './reranker.js';
 
 export interface HybridSearchResult extends DLACSearchResult {
   rrfScore: number;
@@ -19,9 +20,7 @@ export interface HybridSearchParams {
 }
 
 /**
- * Reciprocal Rank Fusion (RRF) Hybrid Search Engine with GraphRAG Traversal Fusion
- * Combines pgvector dense similarity search with PostgreSQL full-text sparse keyword search
- * and enriches top results with 2-hop Apache AGE knowledge graph context.
+ * Reciprocal Rank Fusion (RRF) Hybrid Search Engine with GraphRAG Traversal Fusion and Cross-Encoder Reranking
  */
 export async function hybridSearch(params: HybridSearchParams): Promise<HybridSearchResult[]> {
   const {
@@ -47,7 +46,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
         userId,
         role,
         matchThreshold: 0.05,
-        matchCount: limit * 2,
+        matchCount: limit * 3,
       });
     } catch (err) {
       console.warn('[HybridSearch Warning] Dense vector leg failed:', err);
@@ -63,7 +62,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
         .select('id, title, trigger_condition, category, risk_level, requires_human_gate, workspace_id')
         .eq('workspace_id', workspaceId)
         .or(`title.ilike.%${cleanQuery}%,trigger_condition.ilike.%${cleanQuery}%,category.ilike.%${cleanQuery}%`)
-        .limit(limit * 2);
+        .limit(limit * 3);
 
       if (error || !Array.isArray(sops)) {
         return [];
@@ -145,8 +144,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
     }
   });
 
-  // 5. Sort merged candidates by RRF Score descending
-  const merged: HybridSearchResult[] = Array.from(rrfMap.values())
+  const mergedCandidates: HybridSearchResult[] = Array.from(rrfMap.values())
     .map(({ doc, denseRank, sparseRank, rrfScore }) => ({
       ...doc,
       denseRank,
@@ -154,8 +152,10 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
       rrfScore,
       graphContext: graphFusion.graphContextText || undefined,
     }))
-    .sort((a, b) => b.rrfScore - a.rrfScore)
-    .slice(0, limit);
+    .sort((a, b) => b.rrfScore - a.rrfScore);
 
-  return merged;
+  // 5. Cross-Encoder Reranking: Refine Top-30 candidates down to Top-N
+  const finalReranked = await rerankResults(cleanQuery, mergedCandidates, limit);
+
+  return finalReranked;
 }

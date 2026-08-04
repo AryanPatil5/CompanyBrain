@@ -1,9 +1,10 @@
 import { supabase } from '../config/supabase.js';
 import { dispatchStepExecution } from '../services/integrations/http_adapters.js';
 import { ExecutionPlan, ExecutedStepResult, WorkflowContext } from './types.js';
+import { verifyAnswerGrounding } from '../services/retrieval/groundingGuardrail.js';
 
 /**
- * Executor Agent: Sequential runner executing approved steps, resolving variable outputs, and recording execution logs.
+ * Executor Agent: Sequential runner executing approved steps, resolving variable outputs, and enforcing output grounding.
  */
 export async function executePlan(
   plan: ExecutionPlan,
@@ -39,6 +40,22 @@ export async function executePlan(
       undefined
     );
 
+    // 3. Grounding Guardrail Check: Verify output claims are grounded in source SOP context
+    let finalResponseData = httpRes.response_data;
+    if (httpRes.response_data && typeof httpRes.response_data === 'object' && httpRes.response_data.message) {
+      const grounding = await verifyAnswerGrounding(httpRes.response_data.message, [
+        { title: plan.sop_title, content: plan.user_query },
+      ]);
+      if (!grounding.grounded) {
+        console.warn(`[Executor Warning] Step ${step.step_number} output flagged by Grounding Guardrail:`, grounding.hallucinatedClaims);
+        finalResponseData = {
+          ...httpRes.response_data,
+          warning: 'Ungrounded claims intercepted by Grounding Guardrail.',
+          grounding_sanitized: grounding.sanitizedResponse,
+        };
+      }
+    }
+
     const stepResult: ExecutedStepResult = {
       step_id: step.id,
       step_number: step.step_number,
@@ -47,14 +64,14 @@ export async function executePlan(
       tool_name: step.tool_name,
       outcome: httpRes.success ? 'success' : 'error',
       http_status: httpRes.status_code,
-      response_data: httpRes.response_data,
+      response_data: finalResponseData,
       error: httpRes.error,
     };
 
     results.push(stepResult);
-    stepOutputs[step.id] = httpRes.response_data;
+    stepOutputs[step.id] = finalResponseData;
 
-    // 3. Log execution lifecycle to Supabase execution_logs audit table
+    // 4. Log execution lifecycle to Supabase execution_logs audit table
     try {
       await supabase.from('execution_logs').insert({
         sop_id: plan.sop_id || null,
