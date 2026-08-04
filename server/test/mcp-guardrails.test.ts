@@ -741,6 +741,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 43: Layout-Aware Document & Multi-Sheet Spreadsheet Parser ───
+  try {
+    const { runLayoutParserTest } = await import('./parsers/layoutParser.test.js');
+    const layoutParserSuccess = await runLayoutParserTest();
+    if (layoutParserSuccess) {
+      console.log("✅ TEST 43 PASSED: Layout Parser extracted multi-column PDF tables and multi-sheet XLSX spreadsheets into structured Markdown sections.");
+      passed++;
+    } else {
+      console.error("❌ TEST 43 FAILED: Layout Parser test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 43 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

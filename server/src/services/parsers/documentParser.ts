@@ -1,3 +1,5 @@
+import { parseLayout, DocumentMetadata } from './layoutParser.js';
+
 export interface ParsedSection {
   heading: string;
   level: number;
@@ -9,77 +11,30 @@ export interface ParsedDocumentResult {
   sections: ParsedSection[];
   tablesCount: number;
   mimeType: string;
+  metadata?: DocumentMetadata;
 }
 
 /**
  * Layout-aware document parser service.
- * Preserves Markdown tables, multi-column reading orders, and structural section headings from enterprise PDFs, DOCX, and text.
+ * Routes PDFs, XLSX spreadsheets, and CSV documents through layoutParser preserving structural tables and section headers.
  */
 export async function parseDocument(
   fileBuffer: Buffer,
   mimeType: string = 'text/plain'
 ): Promise<ParsedDocumentResult> {
-  const contentStr = fileBuffer.toString('utf-8');
-  let rawText = contentStr;
-  let tablesCount = 0;
+  const layoutResult = await parseLayout(fileBuffer, mimeType);
+  const rawText = layoutResult.markdownText;
 
-  // 1. Process PDF / Binary tabular layouts
-  if (mimeType === 'application/pdf' || mimeType.includes('pdf')) {
-    // Layout-aware PDF extraction: detect tabular delimiters or matrix lines
-    if (!contentStr.includes('|') && (contentStr.includes('\t') || contentStr.includes('   '))) {
-      rawText = convertTabularLinesToMarkdownTable(contentStr);
-    }
-  } else if (mimeType.includes('word') || mimeType.includes('docx')) {
-    if (!contentStr.includes('|') && contentStr.includes('\t')) {
-      rawText = convertTabularLinesToMarkdownTable(contentStr);
-    }
-  }
-
-  // Count Markdown tables present in parsed text
-  const tableMatches = rawText.match(/\|.+\|\n\|(?:\s*:?-+:?\s*\|)+\n(?:\|.+\|\n?)+/g);
-  tablesCount = tableMatches ? tableMatches.length : (rawText.includes('|') ? 1 : 0);
-
-  // 2. Segment text into structural sections based on Markdown heading levels (#, ##, ###)
+  // Segment text into structural sections based on Markdown heading levels (#, ##, ###)
   const sections = extractHeadingSections(rawText);
 
   return {
     rawText,
     sections,
-    tablesCount,
+    tablesCount: layoutResult.metadata.tablesExtracted,
     mimeType,
+    metadata: layoutResult.metadata,
   };
-}
-
-function convertTabularLinesToMarkdownTable(text: string): string {
-  const lines = text.split('\n');
-  const tableLines: string[] = [];
-  let inTable = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.includes('\t') || line.split(/\s{2,}/).length >= 2) {
-      const cols = line.includes('\t') ? line.split('\t') : line.split(/\s{2,}/);
-      const cleanCols = cols.map((c) => c.trim()).filter((c) => c.length > 0);
-
-      if (cleanCols.length >= 2) {
-        const rowStr = `| ${cleanCols.join(' | ')} |`;
-        if (!inTable) {
-          inTable = true;
-          tableLines.push(rowStr);
-          const separator = `| ${cleanCols.map(() => '---').join(' | ')} |`;
-          tableLines.push(separator);
-        } else {
-          tableLines.push(rowStr);
-        }
-        continue;
-      }
-    }
-
-    inTable = false;
-    tableLines.push(line);
-  }
-
-  return tableLines.join('\n');
 }
 
 function extractHeadingSections(text: string): ParsedSection[] {
