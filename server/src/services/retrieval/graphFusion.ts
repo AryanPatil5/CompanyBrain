@@ -1,6 +1,7 @@
 import { supabase } from '../../config/supabase.js';
-import { getConnectedEntities, executeCypher } from '../graph/graphService.js';
+import { getConnectedEntities } from '../graph/graphService.js';
 import { canonicalizeEntity } from '../graph/entityDisambiguator.js';
+import { calculateTemporalDecayScore } from '../graph/temporalGraphService.js';
 
 export interface GraphFusionResult {
   graphContextText: string;
@@ -16,9 +17,9 @@ export interface GraphFusionUserContext {
 }
 
 /**
- * GraphRAG Traversal Fusion Service with Document-Level Access Control (DLAC)
+ * GraphRAG Traversal Fusion Service with Document-Level Access Control (DLAC) & Temporal Validity Decay
  * Extracts named entities from user query, traverses 2-hop graph paths in Apache AGE / pg graph,
- * and filters out restricted nodes/relationships before constructing context text.
+ * applies temporal decay scoring, and filters out expired/restricted nodes before constructing context text.
  */
 export async function extractEntitiesAndTraverse(
   queryText: string,
@@ -42,17 +43,15 @@ export async function extractEntitiesAndTraverse(
 
   const matchedNodeIds = new Set<string>();
 
-  // 1. Check dictionary aliases
   const canonical = canonicalizeEntity(queryText);
   if (canonical && canonical !== 'unnamed_entity') {
     matchedNodeIds.add(canonical);
   }
 
-  // 2. Extract entity candidate nodes from database graph_nodes table with DLAC permissions
   try {
     const { data: dbNodes } = await supabase
       .from('graph_nodes')
-      .select('id, name, label, allowed_roles')
+      .select('id, name, label, allowed_roles, created_at')
       .eq('workspace_id', workspaceId)
       .limit(50);
 
@@ -60,7 +59,7 @@ export async function extractEntitiesAndTraverse(
       const isAdmin = userRole === 'admin';
       for (const node of dbNodes) {
         if (!isAdmin && node.allowed_roles && !node.allowed_roles.includes(userRole)) {
-          continue; // Skip restricted node
+          continue;
         }
 
         const nodeNameLower = (node.name || '').toLowerCase();
@@ -82,7 +81,6 @@ export async function extractEntitiesAndTraverse(
     return { graphContextText: '', graphNodes: [], entityCount: 0 };
   }
 
-  // 3. Execute DLAC-permissioned 2-hop Cypher / Graph traversal for matched entities
   const graphTuples: string[] = [];
   const fetchedNodes: any[] = [];
 
@@ -90,8 +88,11 @@ export async function extractEntitiesAndTraverse(
     try {
       const connected = await getConnectedEntities(entityId, 2, { userRole, workspaceId });
       for (const c of connected.slice(0, 25)) {
-        graphTuples.push(`(${entityId}) -> [${c.relationship}] -> (${c.node.name || c.entityId})`);
-        fetchedNodes.push(c.node);
+        const decayScore = calculateTemporalDecayScore(c.node.properties?.created_at || new Date());
+        const scoredNode = { ...c.node, decayScore };
+
+        graphTuples.push(`(${entityId}) -> [${c.relationship}] -> (${c.node.name || c.entityId}) (decayScore: ${decayScore.toFixed(2)})`);
+        fetchedNodes.push(scoredNode);
       }
     } catch (err) {
       console.warn(`[GraphFusion Warning] Traversal failed for entity "${entityId}":`, err);
@@ -103,7 +104,7 @@ export async function extractEntitiesAndTraverse(
   }
 
   const uniqueTuples = Array.from(new Set(graphTuples)).slice(0, 25);
-  const graphContextText = `[Knowledge Graph Context]:\n` + uniqueTuples.map((t) => `  - ${t}`).join('\n');
+  const graphContextText = `[Knowledge Graph Context (Temporal Decay Filtered)]:\n` + uniqueTuples.map((t) => `  - ${t}`).join('\n');
 
   return {
     graphContextText,

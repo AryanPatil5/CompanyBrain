@@ -917,6 +917,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 54: Temporal Validity & Exponential Time-Decay Graph Traversal ───
+  try {
+    const { runTemporalGraphServiceTest } = await import('./graph/temporalGraphService.test.js');
+    const temporalSuccess = await runTemporalGraphServiceTest();
+    if (temporalSuccess) {
+      console.log("✅ TEST 54 PASSED: Temporal graph service filtered out expired policy edges and weighted recent knowledge higher using exponential time decay.");
+      passed++;
+    } else {
+      console.error("❌ TEST 54 FAILED: Temporal graph test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 54 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

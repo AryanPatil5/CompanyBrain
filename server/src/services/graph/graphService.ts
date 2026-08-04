@@ -1,6 +1,7 @@
 import { supabase } from '../../config/supabase.js';
 import { validateTriple, type GraphTriple } from './ontologyCompiler.js';
 import { disambiguateTriple } from './entityDisambiguator.js';
+import { isEdgeTemporallyValid } from './temporalGraphService.js';
 
 export interface GraphNode {
   id: string;
@@ -21,6 +22,8 @@ export interface GraphEdge {
   workspace_id?: string;
   allowed_roles?: string[];
   source_document_id?: string;
+  valid_from?: string;
+  valid_until?: string | null;
 }
 
 export interface ConnectedEntityResult {
@@ -204,9 +207,9 @@ export async function getConnectedEntities(
       .or(`source_id.eq.${entityId},target_id.eq.${entityId}`);
 
     if (Array.isArray(edges1) && edges1.length > 0) {
-      // DLAC Filter Edges based on allowed_roles
+      // DLAC & Temporal Validity Filter Edges
       const permittedEdges1 = edges1.filter(
-        (e) => isAdmin || !e.allowed_roles || e.allowed_roles.includes(userRole)
+        (e) => (isAdmin || !e.allowed_roles || e.allowed_roles.includes(userRole)) && isEdgeTemporallyValid(e.valid_from, e.valid_until)
       );
 
       const hop1TargetIds = permittedEdges1.map((e) => (e.source_id === entityId ? e.target_id : e.source_id));
@@ -245,7 +248,7 @@ export async function getConnectedEntities(
 
         if (Array.isArray(edges2) && edges2.length > 0) {
           const permittedEdges2 = edges2.filter(
-            (e) => isAdmin || !e.allowed_roles || e.allowed_roles.includes(userRole)
+            (e) => (isAdmin || !e.allowed_roles || e.allowed_roles.includes(userRole)) && isEdgeTemporallyValid(e.valid_from, e.valid_until)
           );
 
           const hop2TargetIds = permittedEdges2.map((e) => e.target_id).filter((id) => !visited.has(id));
