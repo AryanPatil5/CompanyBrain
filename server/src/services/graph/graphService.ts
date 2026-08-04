@@ -258,3 +258,65 @@ export async function getConnectedEntities(
 
   return results;
 }
+
+/**
+ * Merges two graph nodes by re-pointing all incoming and outgoing edges from sourceNodeId to targetNodeId,
+ * and deleting sourceNodeId from the graph.
+ */
+export async function mergeGraphNodes(
+  sourceNodeId: string,
+  targetNodeId: string
+): Promise<{ mergedEdgesCount: number; success: boolean }> {
+  if (!sourceNodeId || !targetNodeId || sourceNodeId === targetNodeId) {
+    return { mergedEdgesCount: 0, success: false };
+  }
+
+  let mergedEdgesCount = 0;
+
+  try {
+    // 1. Re-point Outgoing Edges: source_id = sourceNodeId -> source_id = targetNodeId
+    const { data: outgoingEdges } = await supabase
+      .from('graph_edges')
+      .select('*')
+      .eq('source_id', sourceNodeId);
+
+    if (Array.isArray(outgoingEdges)) {
+      for (const edge of outgoingEdges) {
+        await createRelationship(targetNodeId, edge.target_id, edge.edge_type, edge.properties || {});
+        mergedEdgesCount++;
+      }
+      await supabase.from('graph_edges').delete().eq('source_id', sourceNodeId);
+    }
+
+    // 2. Re-point Incoming Edges: target_id = sourceNodeId -> target_id = targetNodeId
+    const { data: incomingEdges } = await supabase
+      .from('graph_edges')
+      .select('*')
+      .eq('target_id', sourceNodeId);
+
+    if (Array.isArray(incomingEdges)) {
+      for (const edge of incomingEdges) {
+        await createRelationship(edge.source_id, targetNodeId, edge.edge_type, edge.properties || {});
+        mergedEdgesCount++;
+      }
+      await supabase.from('graph_edges').delete().eq('target_id', sourceNodeId);
+    }
+
+    // 3. Delete source node from graph_nodes database table
+    await supabase.from('graph_nodes').delete().eq('id', sourceNodeId);
+
+    // 4. Execute Apache AGE Cypher statement to re-route edges in Apache AGE graph workspace
+    const cypherMerge = `
+      MATCH (src {id: '${sourceNodeId}'}), (tgt {id: '${targetNodeId}'})
+      MATCH (src)-[r]->(b)
+      MERGE (tgt)-[r2:TYPE(r)]->(b)
+      DETACH DELETE src
+    `;
+    await executeCypher(cypherMerge);
+
+    return { mergedEdgesCount, success: true };
+  } catch (err) {
+    console.warn('[GraphService Warning] Failed to merge graph nodes:', err);
+    return { mergedEdgesCount, success: false };
+  }
+}

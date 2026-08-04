@@ -1,4 +1,5 @@
 import { GraphTriple } from './ontologyCompiler.js';
+import { findSimilarEntities } from './vectorEntityResolver.js';
 
 export const ENTERPRISE_ALIAS_DICTIONARY: Record<string, string> = {
   // Database aliases
@@ -60,6 +61,31 @@ export function canonicalizeEntity(rawName: string, _entityType?: string): strin
 
   // 3. Fallback to snake_case slug
   return normalized || 'unnamed_entity';
+}
+
+/**
+ * Vector-assisted entity resolution before node creation.
+ */
+export async function disambiguateEntityWithVector(
+  rawName: string,
+  entityType: string,
+  workspaceId: string
+): Promise<string> {
+  const dictionaryMatch = canonicalizeEntity(rawName, entityType);
+  if (dictionaryMatch && ENTERPRISE_ALIAS_DICTIONARY[dictionaryMatch]) {
+    return dictionaryMatch;
+  }
+
+  try {
+    const vectorMatch = await findSimilarEntities(rawName, entityType, workspaceId);
+    if (vectorMatch.isDuplicate && vectorMatch.canonicalName) {
+      return canonicalizeEntity(vectorMatch.canonicalName, entityType);
+    }
+  } catch (err) {
+    console.warn('[EntityDisambiguator Warning] Vector resolution fallback:', err);
+  }
+
+  return dictionaryMatch;
 }
 
 /**

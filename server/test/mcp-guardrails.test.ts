@@ -725,6 +725,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 42: Vector-Assisted Graph Entity Resolution & Edge Re-pointing ───
+  try {
+    const { runVectorEntityResolverTest } = await import('./graph/vectorEntityResolver.test.js');
+    const vectorResolverSuccess = await runVectorEntityResolverTest();
+    if (vectorResolverSuccess) {
+      console.log("✅ TEST 42 PASSED: Vector Entity Resolver detected semantic node duplicates, verified identical entities, and re-pointed graph relationship edges.");
+      passed++;
+    } else {
+      console.error("❌ TEST 42 FAILED: Vector Entity Resolver test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 42 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
