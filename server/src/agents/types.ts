@@ -54,10 +54,10 @@ export interface ExecutionResult {
 }
 
 export interface WorkflowContext {
-  workspaceId: string;
-  userId: string;
+  workspaceId?: string;
+  userId?: string;
   userRole?: string;
-  trustRole?: 'low_trust' | 'high_trust' | 'admin';
+  trustRole?: 'low_trust' | 'high_trust' | 'admin' | string;
   mcpToken?: string;
   approvalId?: string;
 }

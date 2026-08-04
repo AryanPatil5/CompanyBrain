@@ -661,6 +661,38 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 38: OpenFGA ReBAC Authorization Engine ───
+  try {
+    const { runOpenFGATest } = await import('./middleware/openfgaMiddleware.test.js');
+    const fgaSuccess = await runOpenFGATest();
+    if (fgaSuccess) {
+      console.log("✅ TEST 38 PASSED: OpenFGA ReBAC Engine evaluated relation tuples, inherited permissions, and access control policy enforcement.");
+      passed++;
+    } else {
+      console.error("❌ TEST 38 FAILED: OpenFGA ReBAC test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 38 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 39: Temporal.io Durable Workflow Orchestration Engine ───
+  try {
+    const { runTemporalOrchestratorTest } = await import('./agents/temporalOrchestrator.test.js');
+    const temporalSuccess = await runTemporalOrchestratorTest();
+    if (temporalSuccess) {
+      console.log("✅ TEST 39 PASSED: Temporal Orchestrator governed multi-agent workflows, activity retries, and Human-in-the-Loop Temporal Signals.");
+      passed++;
+    } else {
+      console.error("❌ TEST 39 FAILED: Temporal Orchestrator test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 39 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
