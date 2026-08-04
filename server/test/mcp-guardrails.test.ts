@@ -901,15 +901,15 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 53: VLM Structural Layout PDF & Financial Table Parsing ───
+  // ─── Test 53: Real PDF Text Extraction Engine ───
   try {
-    const { runVlmLayoutParserTest } = await import('./parsers/vlmLayoutParser.test.js');
-    const vlmSuccess = await runVlmLayoutParserTest();
-    if (vlmSuccess) {
-      console.log("✅ TEST 53 PASSED: VLM Layout Parser converted 2-column PDFs and complex financial tables into structured Markdown without cell corruption.");
+    const { runPdfExtractionTest } = await import('./parsers/pdfExtraction.test.js');
+    const pdfSuccess = await runPdfExtractionTest();
+    if (pdfSuccess) {
+      console.log("✅ TEST 53 PASSED: Real PDF Text Extractor processed PDF buffers, extracted true text content, and verified zero keyword fabrication.");
       passed++;
     } else {
-      console.error("❌ TEST 53 FAILED: VLM Layout Parser test failed!");
+      console.error("❌ TEST 53 FAILED: PDF extraction test failed!");
       failed++;
     }
   } catch (err) {

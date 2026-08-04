@@ -1,5 +1,5 @@
 import { parseLayout, DocumentMetadata } from './layoutParser.js';
-import { parsePdfWithVlmLayout } from './vlmLayoutParser.js';
+import { extractTextFromPdf } from './pdfExtractor.js';
 
 export interface ParsedSection {
   heading: string;
@@ -17,8 +17,7 @@ export interface ParsedDocumentResult {
 
 /**
  * Layout-aware document parser service.
- * Routes PDFs through VLM Layout Parser (vlmLayoutParser) for multi-column & structural table conversion,
- * and spreadsheets through layoutParser.
+ * Routes PDFs through real pdf-parse extractor (extractTextFromPdf) and spreadsheets through layoutParser.
  */
 export async function parseDocument(
   fileBuffer: Buffer,
@@ -30,15 +29,32 @@ export async function parseDocument(
   let metadata: DocumentMetadata | undefined = undefined;
 
   if (mimeType.includes('pdf') || fileName.endsWith('.pdf')) {
-    const vlmResult = await parsePdfWithVlmLayout(fileBuffer, fileName);
-    rawText = vlmResult.markdownText;
-    tablesCount = vlmResult.tablesExtracted;
+    const pdfResult = await extractTextFromPdf(fileBuffer);
+
+    if (pdfResult.isScannedOcrRequired || pdfResult.error || !pdfResult.text) {
+      return {
+        rawText: pdfResult.error || pdfResult.text || '',
+        sections: [],
+        tablesCount: 0,
+        mimeType,
+        metadata: {
+          pageCount: pdfResult.pageCount || 1,
+          tablesExtracted: 0,
+          layoutStructure: 'scanned_ocr_required',
+          headersFound: 0,
+          layoutType: 'pdf-real-text',
+        },
+      };
+    }
+
+    rawText = pdfResult.text;
+    tablesCount = 0; // Honest table count
     metadata = {
-      pageCount: 1,
-      tablesExtracted: vlmResult.tablesExtracted,
-      layoutStructure: vlmResult.columnsDetected > 1 ? 'multi_column_pdf' : 'structured_text',
-      headersFound: vlmResult.columnsDetected,
-      layoutType: vlmResult.columnsDetected > 1 ? 'pdf-vlm-multi-column' : 'pdf-vlm-single',
+      pageCount: pdfResult.pageCount,
+      tablesExtracted: 0,
+      layoutStructure: 'structured_text',
+      headersFound: 1,
+      layoutType: 'pdf-real-text',
     };
   } else {
     const layoutResult = await parseLayout(fileBuffer, mimeType);
@@ -47,7 +63,7 @@ export async function parseDocument(
     metadata = layoutResult.metadata;
   }
 
-  // Segment text into structural sections based on Markdown heading levels (#, ##, ###)
+  // Segment text into structural sections based on Markdown heading levels (#, ##, ###) or fallback Overview
   const sections = extractHeadingSections(rawText);
 
   return {

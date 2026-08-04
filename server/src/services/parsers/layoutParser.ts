@@ -1,3 +1,5 @@
+import { extractTextFromPdf } from './pdfExtractor.js';
+
 export interface DocumentMetadata {
   pageCount: number;
   tablesExtracted: number;
@@ -13,15 +15,16 @@ export interface LayoutParseResult {
 }
 
 /**
- * Parses PDF documents preserving layout boundaries, multi-column blocks, and HTML/Markdown tables.
+ * Parses PDF documents preserving text layout boundaries and table detection using real PDF extraction.
  */
 export async function parsePdfWithLayout(fileBuffer: Buffer): Promise<LayoutParseResult> {
-  const contentStr = fileBuffer.toString('utf-8');
+  const pdfResult = await extractTextFromPdf(fileBuffer);
 
-  // Edge case: Detect scanned image-only PDF with zero text content
-  if (fileBuffer.length > 500 && contentStr.replace(/[\s\x00-\x1F]/g, '').length < 20) {
-    throw new Error('[OCR Pipeline Required]: Scanned image PDF detected with missing text layer.');
+  if (pdfResult.isScannedOcrRequired || pdfResult.error || !pdfResult.text) {
+    throw new Error(pdfResult.error || '[OCR Pipeline Required]: Scanned image PDF detected with missing text layer.');
   }
+
+  const contentStr = pdfResult.text;
 
   const lines = contentStr.split('\n');
   const markdownLines: string[] = [];
@@ -61,7 +64,7 @@ export async function parsePdfWithLayout(fileBuffer: Buffer): Promise<LayoutPars
   return {
     markdownText,
     metadata: {
-      pageCount: Math.max(1, Math.ceil(lines.length / 50)),
+      pageCount: pdfResult.pageCount || 1,
       tablesExtracted,
       layoutStructure: 'multi_column_pdf',
     },
