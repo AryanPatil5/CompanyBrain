@@ -901,6 +901,22 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
+  // ─── Test 53: VLM Structural Layout PDF & Financial Table Parsing ───
+  try {
+    const { runVlmLayoutParserTest } = await import('./parsers/vlmLayoutParser.test.js');
+    const vlmSuccess = await runVlmLayoutParserTest();
+    if (vlmSuccess) {
+      console.log("✅ TEST 53 PASSED: VLM Layout Parser converted 2-column PDFs and complex financial tables into structured Markdown without cell corruption.");
+      passed++;
+    } else {
+      console.error("❌ TEST 53 FAILED: VLM Layout Parser test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 53 EXCEPTION:", err);
+    failed++;
+  }
+
   console.log("-------------------------------------------------");
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");

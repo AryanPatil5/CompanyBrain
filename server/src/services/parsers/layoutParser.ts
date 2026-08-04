@@ -3,6 +3,8 @@ export interface DocumentMetadata {
   tablesExtracted: number;
   sheetNames?: string[];
   layoutStructure: 'multi_column_pdf' | 'spreadsheet' | 'scanned_ocr_required' | 'structured_text';
+  headersFound?: number;
+  layoutType?: string;
 }
 
 export interface LayoutParseResult {

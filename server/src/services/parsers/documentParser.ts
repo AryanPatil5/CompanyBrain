@@ -1,4 +1,5 @@
 import { parseLayout, DocumentMetadata } from './layoutParser.js';
+import { parsePdfWithVlmLayout } from './vlmLayoutParser.js';
 
 export interface ParsedSection {
   heading: string;
@@ -16,14 +17,35 @@ export interface ParsedDocumentResult {
 
 /**
  * Layout-aware document parser service.
- * Routes PDFs, XLSX spreadsheets, and CSV documents through layoutParser preserving structural tables and section headers.
+ * Routes PDFs through VLM Layout Parser (vlmLayoutParser) for multi-column & structural table conversion,
+ * and spreadsheets through layoutParser.
  */
 export async function parseDocument(
   fileBuffer: Buffer,
-  mimeType: string = 'text/plain'
+  mimeType: string = 'text/plain',
+  fileName = 'document'
 ): Promise<ParsedDocumentResult> {
-  const layoutResult = await parseLayout(fileBuffer, mimeType);
-  const rawText = layoutResult.markdownText;
+  let rawText = '';
+  let tablesCount = 0;
+  let metadata: DocumentMetadata | undefined = undefined;
+
+  if (mimeType.includes('pdf') || fileName.endsWith('.pdf')) {
+    const vlmResult = await parsePdfWithVlmLayout(fileBuffer, fileName);
+    rawText = vlmResult.markdownText;
+    tablesCount = vlmResult.tablesExtracted;
+    metadata = {
+      pageCount: 1,
+      tablesExtracted: vlmResult.tablesExtracted,
+      layoutStructure: vlmResult.columnsDetected > 1 ? 'multi_column_pdf' : 'structured_text',
+      headersFound: vlmResult.columnsDetected,
+      layoutType: vlmResult.columnsDetected > 1 ? 'pdf-vlm-multi-column' : 'pdf-vlm-single',
+    };
+  } else {
+    const layoutResult = await parseLayout(fileBuffer, mimeType);
+    rawText = layoutResult.markdownText;
+    tablesCount = layoutResult.metadata.tablesExtracted;
+    metadata = layoutResult.metadata;
+  }
 
   // Segment text into structural sections based on Markdown heading levels (#, ##, ###)
   const sections = extractHeadingSections(rawText);
@@ -31,9 +53,9 @@ export async function parseDocument(
   return {
     rawText,
     sections,
-    tablesCount: layoutResult.metadata.tablesExtracted,
+    tablesCount,
     mimeType,
-    metadata: layoutResult.metadata,
+    metadata,
   };
 }
 
