@@ -1,20 +1,23 @@
+import { evaluateGroundingScore } from '../eval/hallucinationEvaluator.js';
+
 export interface GroundingVerificationResult {
   grounded: boolean;
   hallucinatedClaims: string[];
   sanitizedResponse: string;
+  groundingScore?: number;
 }
 
 /**
  * Output Grounding Guardrail
  * Verifies that agent responses are strictly grounded in retrieved corporate source documents,
- * detecting and intercepting ungrounded hallucinated assertions.
+ * enforcing a 0.95 grounding score threshold and intercepting ungrounded claims.
  */
 export async function verifyAnswerGrounding(
   llmResponse: string,
   retrievedChunks: Array<{ title?: string; trigger_condition?: string; content?: string; [key: string]: any }> = []
 ): Promise<GroundingVerificationResult> {
   if (!llmResponse || llmResponse.trim().length === 0) {
-    return { grounded: true, hallucinatedClaims: [], sanitizedResponse: '' };
+    return { grounded: true, hallucinatedClaims: [], sanitizedResponse: '', groundingScore: 1.0 };
   }
 
   const cleanResponse = llmResponse.trim();
@@ -28,45 +31,24 @@ export async function verifyAnswerGrounding(
     'processing your request',
   ];
   if (fillerPhrases.some((f) => cleanResponse.toLowerCase().startsWith(f)) && cleanResponse.length < 60) {
-    return { grounded: true, hallucinatedClaims: [], sanitizedResponse: cleanResponse };
+    return { grounded: true, hallucinatedClaims: [], sanitizedResponse: cleanResponse, groundingScore: 1.0 };
   }
 
-  // Combine context text from all retrieved chunks
-  const combinedContext = retrievedChunks
-    .map((c) => `${c.title || ''} ${c.trigger_condition || ''} ${c.content || ''}`)
-    .join(' ')
-    .toLowerCase();
+  const evalResult = await evaluateGroundingScore(cleanResponse, retrievedChunks);
 
-  // Extract key assertions (e.g. policy codes, numbers, specific policy names)
-  const assertions = cleanResponse.match(/(?:policy|rule|code|section|sop)\s+[A-Za-z0-9_-]+/gi) || [];
-  const hallucinatedClaims: string[] = [];
-
-  for (const assertion of assertions) {
-    const term = assertion.toLowerCase();
-    if (!combinedContext.includes(term) && !combinedContext.includes(term.split(/\s+/)[1])) {
-      hallucinatedClaims.push(assertion);
-    }
-  }
-
-  // Explicit check for ungrounded financial or policy assertions
-  if (
-    cleanResponse.toLowerCase().includes('unauthorized_fake_policy') ||
-    cleanResponse.toLowerCase().includes('non-existent policy')
-  ) {
-    hallucinatedClaims.push('Unverified policy assertion');
-  }
-
-  if (hallucinatedClaims.length > 0) {
+  if (!evalResult.passedThreshold || evalResult.hallucinatedClaims.length > 0) {
     return {
       grounded: false,
-      hallucinatedClaims,
-      sanitizedResponse: `[Grounding Guardrail Refusal]: Response was rejected because it contains ungrounded claims (${hallucinatedClaims.join(', ')}) not present in source documents.`,
+      hallucinatedClaims: evalResult.hallucinatedClaims,
+      groundingScore: evalResult.groundingScore,
+      sanitizedResponse: `[Grounding Guardrail Refusal]: Response rejected due to low grounding score (${(evalResult.groundingScore * 100).toFixed(1)}% < 95.0% threshold). Ungrounded claims: ${evalResult.hallucinatedClaims.join(', ') || 'Unverified assertions'}.`,
     };
   }
 
   return {
     grounded: true,
     hallucinatedClaims: [],
+    groundingScore: evalResult.groundingScore,
     sanitizedResponse: cleanResponse,
   };
 }
