@@ -55,6 +55,9 @@ async function bootstrap(processes: string[]): Promise<void> {
   if (configuredProcesses.includes('ingestion-worker')) {
     console.log('[INFO] Ingestion worker process started');
   }
+  if (configuredProcesses.includes('github-sync-worker')) {
+    console.log('[INFO] GitHub sync worker process started');
+  }
   if (configuredProcesses.includes('temporal-worker')) {
     console.log('[INFO] Temporal worker process started');
   }
@@ -84,6 +87,10 @@ async function bootstrap(processes: string[]): Promise<void> {
 
   if (enabledProcesses.includes('ingestion-worker')) {
     await import('./workers/ingestionWorker.js');
+  }
+
+  if (enabledProcesses.includes('github-sync-worker')) {
+    await import('./workers/githubSyncWorker.js');
   }
 
   if (enabledProcesses.includes('temporal-worker')) {

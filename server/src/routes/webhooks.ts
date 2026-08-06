@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { verifyWebhookSignature, processWebhookEvent } from '../services/ingestion/webhookService.js';
 import { webhookIngestionQueue } from '../queue/ingestionQueue.js';
+import { createGithubWebhookHandler } from '../connectors/github/webhook.js';
+import { logger } from '../logger.js';
 
 const router = Router();
 
@@ -50,6 +52,35 @@ router.post('/:provider', async (req: Request, res: Response): Promise<void> => 
     `deliv_${Date.now()}`;
 
   const workspaceId = (req.headers['x-workspace-id'] as string) || '00000000-0000-0000-0000-000000000000';
+
+  // GitHub webhooks are dispatched through the GitHub connector so events are
+  // parsed into sync jobs on the github-sync queue (consumed by githubSyncWorker).
+  if (provider === 'github') {
+    try {
+      const githubHandler = createGithubWebhookHandler();
+      const result = await githubHandler.handleEvent({
+        event: (req.headers['x-github-event'] as string) || 'push',
+        deliveryId,
+        payload: req.body,
+        workspaceId,
+      });
+      if (!result.handled) {
+        logger.info('github_webhook_not_handled', { deliveryId, reason: result.reason });
+      }
+    } catch (err: any) {
+      logger.warn('github_webhook_dispatch_failed', { deliveryId, error: err.message });
+    }
+
+    const durationMs = Date.now() - startTime;
+    res.status(200).json({
+      status: 'ok',
+      message: 'Webhook payload received and queued.',
+      provider,
+      deliveryId,
+      durationMs,
+    });
+    return;
+  }
 
   // Push raw payload to BullMQ webhook-ingestion queue asynchronously
   try {

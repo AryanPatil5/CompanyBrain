@@ -5,9 +5,11 @@ import ingestionRouter from './routes/ingestion.js';
 import sopsRouter from './routes/sops.js';
 import integrationsRouter from './routes/integrations.js';
 import webhooksRouter from './routes/webhooks.js';
+import githubRouter from './routes/github.js';
 import { startMCPServer } from './services/mcp.js';
 import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
 import { startIngestionWorker, stopIngestionWorker } from './workers/ingestionWorker.js';
+import { startGithubSyncWorker, stopGithubSyncWorker } from './workers/githubSyncWorker.js';
 import { startTemporalWorker, stopTemporalWorker } from './workers/temporalWorker.js';
 
 import { observabilityMiddleware, getMetricsSnapshot } from './middleware/observability.js';
@@ -71,6 +73,7 @@ app.use('/api/ingestion', ingestionRouter);
 app.use('/api/sops', sopsRouter);
 app.use('/api/integrations', integrationsRouter);
 app.use('/api/v1/webhooks', webhooksRouter);
+app.use('/api/github', githubRouter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'Company Brain Backend' });
@@ -99,6 +102,9 @@ startCrawlerWorker();
 // Start BullMQ Asynchronous Ingestion Worker (Concurrency: 2)
 startIngestionWorker();
 
+// Start GitHub Connector Sync Worker
+startGithubSyncWorker();
+
 // Start Temporal.io Durable Workflow Worker
 startTemporalWorker();
 
@@ -107,6 +113,7 @@ const shutdown = async () => {
   console.log('[INFO] Gracefully shutting down Express server...');
   stopCrawlerWorker();
   await stopIngestionWorker();
+  await stopGithubSyncWorker();
   await stopTemporalWorker();
   server.close(() => {
     console.log('[INFO] Server closed and port released.');
