@@ -1,20 +1,8 @@
-import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import dotenv from 'dotenv';
+import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { getKeyProvider } from './keyProvider.js';
 
 dotenv.config();
-
-// Default 32-byte (256-bit) master key fallback for local development & testing
-const DEFAULT_DEV_MASTER_KEY_HEX = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-
-function getMasterKey(): Buffer {
-  const envKey = process.env.KMS_MASTER_KEY || DEFAULT_DEV_MASTER_KEY_HEX;
-  // If key is 64 hex characters (32 bytes)
-  if (envKey.length === 64 && /^[0-9a-fA-F]+$/.test(envKey)) {
-    return Buffer.from(envKey, 'hex');
-  }
-  // Otherwise pad/hash or slice to 32 bytes
-  return Buffer.alloc(32, envKey, 'utf-8');
-}
 
 export interface EncryptedPayload {
   cipherText: string;
@@ -24,13 +12,21 @@ export interface EncryptedPayload {
 
 /**
  * Encrypts a plain text secret or token using AES-256-GCM envelope encryption.
+ * Uses the KeyProvider interface to obtain encryption keys.
  */
-export function encryptSecret(plainText: string): EncryptedPayload {
+export async function encryptSecret(plainText: string): Promise<EncryptedPayload> {
   if (plainText === undefined || plainText === null) {
     throw new Error('Cannot encrypt undefined or null plain text.');
   }
 
-  const masterKey = getMasterKey();
+  const keyProvider = getKeyProvider();
+  const resolvedKey = await keyProvider.resolveCredential('KMS_MASTER_KEY');
+  
+  if (!resolvedKey) {
+    throw new Error('No master key available from KeyProvider');
+  }
+
+  const masterKey = Buffer.from(resolvedKey, 'hex');
   const iv = randomBytes(12); // 96-bit IV recommended for GCM
   const cipher = createCipheriv('aes-256-gcm', masterKey, iv);
 
@@ -48,13 +44,21 @@ export function encryptSecret(plainText: string): EncryptedPayload {
 
 /**
  * Decrypts an AES-256-GCM encrypted payload back to plain text.
+ * Uses the KeyProvider interface to obtain encryption keys.
  */
-export function decryptSecret(payload: EncryptedPayload): string {
+export async function decryptSecret(payload: EncryptedPayload): Promise<string> {
   if (!payload || !payload.cipherText || !payload.iv || !payload.authTag) {
     throw new Error('Invalid EncryptedPayload structure. Required: { cipherText, iv, authTag }.');
   }
 
-  const masterKey = getMasterKey();
+  const keyProvider = getKeyProvider();
+  const resolvedKey = await keyProvider.resolveCredential('KMS_MASTER_KEY');
+  
+  if (!resolvedKey) {
+    throw new Error('No master key available from KeyProvider');
+  }
+
+  const masterKey = Buffer.from(resolvedKey, 'hex');
   const iv = Buffer.from(payload.iv, 'hex');
   const authTag = Buffer.from(payload.authTag, 'hex');
   const decipher = createDecipheriv('aes-256-gcm', masterKey, iv);

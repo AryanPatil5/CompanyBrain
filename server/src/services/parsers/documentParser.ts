@@ -1,4 +1,4 @@
-import { parseLayout, DocumentMetadata } from './layoutParser.js';
+import { parseLayout, convertTabularTextToMarkdown, DocumentMetadata } from './layoutParser.js';
 import { extractTextFromPdf } from './pdfExtractor.js';
 
 export interface ParsedSection {
@@ -32,6 +32,29 @@ export async function parseDocument(
     const pdfResult = await extractTextFromPdf(fileBuffer);
 
     if (pdfResult.isScannedOcrRequired || pdfResult.error || !pdfResult.text) {
+      // Graceful fallback for buffers declared as PDF but containing plain text
+      // (e.g., corrupt files or mislabeled uploads). Real PDFs start with the
+      // '%PDF-' magic header; anything else is parsed as text instead of erroring.
+      // Buffers without meaningful printable text keep the OCR-required signal.
+      const textContent = fileBuffer.toString('utf-8');
+      const meaningfulText = textContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+      if (!fileBuffer.subarray(0, 5).toString('utf-8').startsWith('%PDF-') && meaningfulText.length > 0) {
+        const { markdownText, tablesExtracted } = convertTabularTextToMarkdown(textContent);
+        return {
+          rawText: markdownText,
+          sections: extractHeadingSections(markdownText),
+          tablesCount: tablesExtracted,
+          mimeType,
+          metadata: {
+            pageCount: 1,
+            tablesExtracted,
+            layoutStructure: 'structured_text',
+            headersFound: 0,
+            layoutType: 'text-fallback',
+          },
+        };
+      }
+
       return {
         rawText: pdfResult.error || pdfResult.text || '',
         sections: [],

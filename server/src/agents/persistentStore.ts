@@ -7,9 +7,11 @@ dotenv.config();
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 export const agentRedisClient = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-  enableOfflineQueue: true,
   lazyConnect: true,
+  enableOfflineQueue: false,
+  maxRetriesPerRequest: 1,
+  connectTimeout: 1000,
+  retryStrategy: () => null,
 });
 
 agentRedisClient.on('error', (err) => {
@@ -37,7 +39,17 @@ export async function saveWorkflowState(
   inMemoryStore.set(key, state);
 
   try {
+    try {
+  if (agentRedisClient.status === "wait") {
+    await agentRedisClient.connect();
+  }
+
+  if (agentRedisClient.status === "ready") {
     await agentRedisClient.setex(key, ttlSeconds, serialized);
+  }
+} catch {
+  // Redis unavailable. In-memory state is already saved.
+}
   } catch (err) {
     // Redis offline fallback
   }

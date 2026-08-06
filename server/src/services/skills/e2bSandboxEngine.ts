@@ -81,60 +81,59 @@ export class E2BSandboxEngine {
       throw new Error('[MicroVM Security Enforcement]: Native Node VM is strictly forbidden in production. Configure E2B_API_KEY.');
     }
 
-    // Isolated fallback execution for dev / test mode without E2B API Key
+    // Isolated fallback execution for dev / test mode without E2B API Key.
+    // Uses a real V8 isolate (isolated-vm) so CPU-bound infinite loops are
+    // preempted via a hard timeout instead of blocking the host event loop.
     return new Promise((resolve, reject) => {
       let isSettled = false;
       let stdout = '';
       let stderr = '';
+      let isolate: any = null;
 
-      const timer = setTimeout(() => {
-        if (!isSettled) {
-          isSettled = true;
-          reject(new Error(`[CPU Timeout]: MicroVM execution exceeded limit of ${timeoutMs}ms.`));
+      const settle = (action: () => void) => {
+        if (isSettled) return;
+        isSettled = true;
+        try {
+          isolate?.dispose();
+        } catch {
+          // Best-effort cleanup
         }
-      }, timeoutMs);
+        action();
+      };
 
-      try {
-        // Enforce isolated execution without exposing host process environment
-        const sanitizedGlobal: Record<string, any> = {
-          console: {
-            log: (...args: any[]) => { stdout += args.map(String).join(' ') + '\n'; },
-            error: (...args: any[]) => { stderr += args.map(String).join(' ') + '\n'; },
-          },
-          Math,
-          JSON,
-          Array,
-          Object,
-          String,
-          Number,
-          Boolean,
-          Date,
-          process: undefined,
-          require: undefined,
-          global: undefined,
-        };
+      (async () => {
+        const ivmModule: any = await import('isolated-vm');
+        const ivm = ivmModule.default || ivmModule;
 
-        const runner = new Function(
-          'env',
-          'console',
-          `
-          "use strict";
-          // Mask prototype constructor
-          try {
-            Object.defineProperty(Object.prototype, 'constructor', {
-              get: function() { throw new Error("[IsolationSecurityError]: Prototype constructor access forbidden."); },
-              configurable: false
-            });
-          } catch {}
-          ${code}
-        `
+        isolate = new ivm.Isolate({ memoryLimit: 128 });
+        const context = isolate.createContextSync();
+
+        const logFn = new ivm.Reference((...args: unknown[]) => {
+          stdout += args.map(String).join(' ') + '\n';
+        });
+        const errFn = new ivm.Reference((...args: unknown[]) => {
+          stderr += args.map(String).join(' ') + '\n';
+        });
+
+        context.global.setSync('__sandboxLog', logFn);
+        context.global.setSync('__sandboxErr', errFn);
+        context.global.setSync('env', new ivm.ExternalCopy(envVars).copyInto());
+
+        const script = isolate.compileScriptSync(
+          `"use strict";
+          const console = {
+            log: (...args) => __sandboxLog.applySync(undefined, args),
+            error: (...args) => __sandboxErr.applySync(undefined, args),
+          };
+          const __result = (function (env, console) {
+            ${code}
+          })(env, console);
+          __result;`
         );
 
-        const res = runner(envVars, sanitizedGlobal.console);
-        clearTimeout(timer);
+        const res = script.runSync(context, { timeout: timeoutMs });
 
-        if (!isSettled) {
-          isSettled = true;
+        settle(() => {
           resolve({
             stdout: stdout.trim(),
             stderr: stderr.trim(),
@@ -142,20 +141,18 @@ export class E2BSandboxEngine {
             exitCode: 0,
             durationMs: Date.now() - startTime,
           });
-        }
-      } catch (err: any) {
-        clearTimeout(timer);
-        if (!isSettled) {
-          isSettled = true;
-          if (err.message?.includes('IsolationSecurityError') || err.name === 'IsolationSecurityError') {
-            reject(new IsolationSecurityError(err.message));
-          } else if (err.message?.includes('timed out') || err.message?.includes('Timeout')) {
+        });
+      })().catch((err: any) => {
+        settle(() => {
+          if (err?.message?.includes('timed out') || err?.message?.includes('Timeout')) {
             reject(new Error(`[CPU Timeout]: MicroVM execution exceeded limit of ${timeoutMs}ms.`));
+          } else if (err?.message?.includes('IsolationSecurityError') || err?.name === 'IsolationSecurityError') {
+            reject(new IsolationSecurityError(err.message));
           } else {
             reject(err);
           }
-        }
-      }
+        });
+      });
     });
   }
 }

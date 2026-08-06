@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import { correlationIdMiddleware } from './correlationId.js';
+import { logger } from '../logger.js';
 
 interface MetricsRegistry {
   httpRequestsTotal: Record<string, number>;

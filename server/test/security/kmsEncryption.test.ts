@@ -5,10 +5,16 @@ export async function runKmsEncryptionTest(): Promise<boolean> {
   console.log('  Running KMS AES-256-GCM Encryption Test Suite ');
   console.log('=================================================');
 
+  // KeyProvider-backed KMS requires a resolvable master key; the test
+  // provides a deterministic 32-byte (64 hex char) dev key explicitly.
+  process.env.KEY_PROVIDER = process.env.KEY_PROVIDER || 'environment';
+  process.env.KMS_MASTER_KEY =
+    process.env.KMS_MASTER_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
   const secretMessage = 'xoxb-slack-bot-token-secret-12345-enterprise-key';
 
   // 1. Test Encryption
-  const encryptedPayload = encryptSecret(secretMessage);
+  const encryptedPayload = await encryptSecret(secretMessage);
 
   if (!encryptedPayload.cipherText || !encryptedPayload.iv || !encryptedPayload.authTag) {
     console.error('❌ KMS TEST FAILED: Encryption payload missing required fields!', encryptedPayload);
@@ -23,7 +29,7 @@ export async function runKmsEncryptionTest(): Promise<boolean> {
   console.log('✅ KMS TEST PASSED: Successfully encrypted secret with 12-byte IV and AES-256-GCM authTag.');
 
   // 2. Test Decryption
-  const decryptedText = decryptSecret(encryptedPayload);
+  const decryptedText = await decryptSecret(encryptedPayload);
 
   if (decryptedText !== secretMessage) {
     console.error('❌ KMS TEST FAILED: Decrypted secret text mismatch!', { secretMessage, decryptedText });
@@ -39,7 +45,7 @@ export async function runKmsEncryptionTest(): Promise<boolean> {
   };
 
   try {
-    decryptSecret(tamperedPayload);
+    await decryptSecret(tamperedPayload);
     console.error('❌ KMS TEST FAILED: Decrypting tampered payload did not throw authTag validation error!');
     return false;
   } catch (tamperErr: any) {
@@ -51,6 +57,6 @@ export async function runKmsEncryptionTest(): Promise<boolean> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runKmsEncryptionTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

@@ -15,50 +15,78 @@ export async function runWorkflow(
   context: WorkflowContext,
   resumeWorkflowId?: string
 ): Promise<ExecutionResult> {
-  const workflowId = resumeWorkflowId || `wf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+  const workflowId =
+    resumeWorkflowId ||
+    `wf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
   let currentLifecycle: WorkflowStatus = 'IDLE';
 
-  // 1. Resume existing workflow state if resumeWorkflowId provided
+  // Resume existing workflow
   let existingState: ExecutionResult | null = null;
   if (resumeWorkflowId) {
     existingState = await getWorkflowState(resumeWorkflowId);
-    if (existingState && existingState.status === 'paused_approval' && context.approvalId) {
+
+    if (
+      existingState &&
+      existingState.status === 'paused_approval' &&
+      context.approvalId
+    ) {
       currentLifecycle = 'AWAITING_APPROVAL';
     }
   }
 
-  // 2. Planning State Transition
-  const transPlan = transitionState(currentLifecycle, 'PLANNING');
-  currentLifecycle = transPlan.to;
+  // Planning
+  currentLifecycle = transitionState(currentLifecycle, 'PLANNING').to;
 
-  const plan = (existingState?.plan) ? existingState.plan : await generatePlan(userQuery, context);
+  const plan = existingState?.plan
+    ? existingState.plan
+    : await generatePlan(userQuery, context);
+
 
   let initialState: ExecutionResult = {
     workflow_id: workflowId,
-    status: 'completed', // Transient
+    status: 'completed',
     plan,
-    audit: existingState?.audit || { approved: false, requires_human_approval: false, risk_level: 'Low', flagged_reasons: [] },
+    audit:
+      existingState?.audit || {
+        approved: false,
+        requires_human_approval: false,
+        risk_level: 'Low',
+        flagged_reasons: [],
+      },
     executed_steps: existingState?.executed_steps || [],
   };
+
   await saveWorkflowState(workflowId, initialState);
 
-  // 3. Auditing State Transition
-  const transAudit = transitionState(currentLifecycle, 'AUDITING');
-  currentLifecycle = transAudit.to;
+  // Audit
+  currentLifecycle = transitionState(currentLifecycle, 'AUDITING').to;
 
-  const audit = existingState?.audit ? existingState.audit : await auditPlan(plan, context);
+  const audit = existingState?.audit
+    ? existingState.audit
+    : await auditPlan(plan, context);
+
+
   initialState.audit = audit;
+
   await saveWorkflowState(workflowId, initialState);
 
-  // 4. Human Approval Gate Check
+  // Human Approval
+
   if (audit.requires_human_approval && !context.approvalId) {
-    const transGate = transitionState(currentLifecycle, 'AWAITING_APPROVAL');
-    currentLifecycle = transGate.to;
 
-    console.log(`[Orchestrator] Plan flagged by Auditor (${audit.flagged_reasons.join(' | ')}). Pausing for human approval...`);
+    currentLifecycle = transitionState(
+      currentLifecycle,
+      'AWAITING_APPROVAL'
+    ).to;
 
-    let approvalId = `appr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    let approvalId = `appr_${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(2, 6)}`;
+
     try {
+
       const { data: ticket } = await supabase
         .from('pending_approvals')
         .insert({
@@ -68,16 +96,21 @@ export async function runWorkflow(
           risk_level: audit.risk_level,
           status: 'pending',
           reason: `Flagged by Auditor Agent: ${audit.flagged_reasons.join('; ')}`,
-          execution_context: { plan_id: plan.id, user_query: userQuery, workflow_id: workflowId },
+          execution_context: {
+            plan_id: plan.id,
+            user_query: userQuery,
+            workflow_id: workflowId,
+          },
         })
         .select('id')
         .single();
 
+
       if (ticket?.id) {
         approvalId = ticket.id;
       }
-    } catch (dbErr) {
-      console.warn('[Orchestrator Warning] Failed to write pending approval ticket:', dbErr);
+    } catch (err) {
+      console.warn('[17] Supabase insert failed:', err);
     }
 
     const pausedResult: ExecutionResult = {
@@ -87,61 +120,73 @@ export async function runWorkflow(
       audit,
       executed_steps: [],
       approval_id: approvalId,
-      error: `Workflow paused: Human manager approval required ticket #${approvalId}. Reasons: ${audit.flagged_reasons.join(' | ')}`,
+      error: `Workflow paused: Human manager approval required ticket #${approvalId}. Reasons: ${audit.flagged_reasons.join(
+        ' | '
+      )}`,
     };
 
     await saveWorkflowState(workflowId, pausedResult);
+
     return pausedResult;
   }
 
-  // 5. Verification if approvalId is passed
+  // Approval validation
   if (context.approvalId) {
+
     try {
       const { data: ticket } = await supabase
         .from('pending_approvals')
-        .select('id, status, consumed_at')
+        .select('id,status,consumed_at')
         .eq('id', context.approvalId)
         .single();
 
-      if (!ticket || ticket.status !== 'approved' || ticket.consumed_at !== null) {
-        const failedResult: ExecutionResult = {
+      if (
+        !ticket ||
+        ticket.status !== 'approved' ||
+        ticket.consumed_at !== null
+      ) {
+        return {
           workflow_id: workflowId,
           status: 'failed',
           plan,
           audit,
           executed_steps: [],
-          error: `Approval ticket #${context.approvalId} is invalid, unapproved, or already consumed.`,
+          error: `Approval ticket ${context.approvalId} is invalid.`,
         };
-        await saveWorkflowState(workflowId, failedResult);
-        return failedResult;
       }
 
-      // Claim ticket
       await supabase
         .from('pending_approvals')
-        .update({ consumed_at: new Date().toISOString() })
+        .update({
+          consumed_at: new Date().toISOString(),
+        })
         .eq('id', context.approvalId);
-    } catch {
-      // Non-fatal query catch during dev tests
+
+    } catch (err) {
+      console.warn('[22] Approval validation failed:', err);
     }
   }
 
-  // 6. Executing State Transition & Execution Run
-  const transExec = transitionState(currentLifecycle, 'EXECUTING');
-  currentLifecycle = transExec.to;
+  // Execute
+  currentLifecycle = transitionState(currentLifecycle, 'EXECUTING').to;
 
   const executedSteps = await executePlan(plan, context);
 
-  // Update step outcomes in Redis persistent store
-  for (const stepRes of executedSteps) {
-    await updateStepStatus(workflowId, stepRes.step_id, stepRes.outcome, stepRes.response_data);
+  for (const step of executedSteps) {
+    await updateStepStatus(
+      workflowId,
+      step.step_id,
+      step.outcome,
+      step.response_data
+    );
   }
 
   const hasErrors = executedSteps.some((s) => s.outcome === 'error');
-  const finalStatus: WorkflowStatus = hasErrors ? 'FAILED' : 'COMPLETED';
 
-  const transFinal = transitionState(currentLifecycle, finalStatus);
-  currentLifecycle = transFinal.to;
+  currentLifecycle = transitionState(
+    currentLifecycle,
+    hasErrors ? 'FAILED' : 'COMPLETED'
+  ).to;
 
   const finalResult: ExecutionResult = {
     workflow_id: workflowId,
@@ -152,6 +197,7 @@ export async function runWorkflow(
   };
 
   await saveWorkflowState(workflowId, finalResult);
+
   return finalResult;
 }
 

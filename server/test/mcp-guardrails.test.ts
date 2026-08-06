@@ -302,8 +302,8 @@ async function runMcpGuardrailsTestSuite() {
   // ─── Test 16: Cryptographic AES-256-GCM Encryption & CSRF Nonce Validation (Gaps I & J) ───
   try {
     const secret = "xoxb-secret-oauth-token-12345";
-    const encrypted = encryptSecret(secret);
-    const decrypted = decryptSecret(encrypted);
+    const encrypted = await encryptSecret(secret);
+    const decrypted = await decryptSecret(encrypted);
 
     if (encrypted.startsWith("enc:v2:") && decrypted === secret) {
       console.log("✅ TEST 16 PASSED: AES-256-GCM token encryption and CSRF nonce state protection active.");
@@ -1004,6 +1004,7 @@ async function runMcpGuardrailsTestSuite() {
   if (failed > 0) {
     process.exit(1);
   }
+  process.exit(0);
 }
 
 runMcpGuardrailsTestSuite();

@@ -44,6 +44,6 @@ export async function runEntityDisambiguatorTest(): Promise<boolean> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runEntityDisambiguatorTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

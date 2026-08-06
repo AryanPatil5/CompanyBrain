@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { resolveCredential } from './secrets.js';
+import { ssrfGuard } from '../security/ssrfGuard.js';
 
 export interface HttpDispatchResult {
   success: boolean;

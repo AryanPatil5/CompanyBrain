@@ -10,7 +10,7 @@ export async function runToolSelfHealerTest(): Promise<boolean> {
     const brokenCode = "retur { status: 'ok', }";
     const repaired = repairExecutableCode(brokenCode, 'Unexpected token');
 
-    if (!repaired.includes('return') || repaired.includes('retur')) {
+    if (!repaired.includes('return') || /\bretur\b/.test(repaired)) {
       console.error('❌ SELF-HEALER TEST FAILED: Typo repair failed to fix retur statement!', repaired);
       return false;
     }
@@ -55,6 +55,6 @@ export async function runToolSelfHealerTest(): Promise<boolean> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runToolSelfHealerTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

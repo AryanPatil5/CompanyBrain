@@ -1,4 +1,8 @@
 import { spawn } from 'node:child_process';
+import { rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { executeSecurely } from './secureSandboxEngine.js';
 
 export interface SandboxExecutionResult {
@@ -6,6 +10,104 @@ export interface SandboxExecutionResult {
   stderr: string;
   exitCode: number;
   durationMs: number;
+}
+
+/**
+ * Runs a child process to completion, force-killing it if it exceeds the timeout.
+ * Ensures every spawned process (docker client or local fallback) is terminated
+ * so the promise always settles. Docker containers are tracked via a cidfile so
+ * a timed-out `docker run` can be force-removed instead of being orphaned.
+ */
+function runProcessWithTimeout(
+  cmd: string,
+  args: string[],
+  timeoutMs: number,
+  startTime: number,
+  cidfile?: string
+): Promise<SandboxExecutionResult> {
+  return new Promise<SandboxExecutionResult>((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    let isSettled = false;
+
+    const childProc = spawn(cmd, args);
+
+    const cleanupDockerContainer = () => {
+      if (!cidfile) return;
+      try {
+        const containerId = readFileSync(cidfile, 'utf8').trim();
+        if (containerId) {
+          spawn('docker', ['rm', '-f', containerId]);
+        }
+      } catch {
+        // Container never started or already removed
+      } finally {
+        try {
+          rmSync(cidfile, { force: true });
+        } catch {
+          // Best-effort cleanup
+        }
+      }
+    };
+
+    const timer = setTimeout(() => {
+      if (!isSettled) {
+        isSettled = true;
+        try {
+          childProc.kill('SIGKILL');
+        } catch {
+          // Process already dead
+        }
+        cleanupDockerContainer();
+        resolve({
+          stdout,
+          stderr: stderr + `\n[Sandbox Error]: Execution timed out after ${timeoutMs}ms.`,
+          exitCode: 124,
+          durationMs: Date.now() - startTime,
+        });
+      }
+    }, timeoutMs);
+
+    childProc.stdout?.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    childProc.stderr?.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    childProc.on('error', () => {
+      if (!isSettled) {
+        isSettled = true;
+        clearTimeout(timer);
+        cleanupDockerContainer();
+        resolve({
+          stdout,
+          stderr: stderr + '\n[Sandbox Error]: Failed to spawn process.',
+          exitCode: 1,
+          durationMs: Date.now() - startTime,
+        });
+      }
+    });
+
+    childProc.on('close', (code) => {
+      if (!isSettled) {
+        isSettled = true;
+        clearTimeout(timer);
+        try {
+          rmSync(cidfile ?? '', { force: true });
+        } catch {
+          // Best-effort cleanup
+        }
+        resolve({
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          exitCode: code ?? 0,
+          durationMs: Date.now() - startTime,
+        });
+      }
+    });
+  });
 }
 
 /**
@@ -44,10 +146,13 @@ export async function executeInSandbox(
 
   const image = 'python:3.11-slim';
   const execCmd = ['python3', '-c', code];
+  const cidfile = join(tmpdir(), `cb-sandbox-${randomUUID()}.cid`);
 
   const dockerArgs = [
     'run',
     '--rm',
+    '--cidfile',
+    cidfile,
     '--network',
     'none',
     '--memory',
@@ -58,119 +163,20 @@ export async function executeInSandbox(
     ...execCmd,
   ];
 
-  return new Promise<SandboxExecutionResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let isSettled = false;
+  const forceLocalFallback = process.env.SANDBOX_FORCE_LOCAL === 'true';
 
-    let childProc;
-    const forceLocalFallback = process.env.SANDBOX_FORCE_LOCAL === 'true';
+  if (forceLocalFallback) {
+    return runProcessWithTimeout(fallbackCmd, fallbackArgs, timeoutMs, startTime);
+  }
 
-    if (!forceLocalFallback) {
-      try {
-        childProc = spawn('docker', dockerArgs);
-      } catch {
-        // Docker unavailable
-      }
-    }
+  const dockerRes = await runProcessWithTimeout('docker', dockerArgs, timeoutMs, startTime, cidfile);
 
-    if (!childProc) {
-      childProc = spawn(fallbackCmd, fallbackArgs);
-    }
+  if (
+    dockerRes.exitCode !== 0 &&
+    (dockerRes.stderr.includes('Unable to find image') || dockerRes.stderr.includes('Pulling'))
+  ) {
+    return runProcessWithTimeout(fallbackCmd, fallbackArgs, timeoutMs, startTime);
+  }
 
-    const timer = setTimeout(() => {
-      if (!isSettled) {
-        isSettled = true;
-        try {
-          childProc.kill('SIGKILL');
-        } catch {
-          // Process already killed
-        }
-
-        if (stderr.includes('Unable to find image') || stderr.includes('Pulling')) {
-          const localProc = spawn(fallbackCmd, fallbackArgs);
-          let lStdout = '';
-          let lStderr = '';
-          localProc.stdout?.on('data', (c) => { lStdout += c.toString(); });
-          localProc.stderr?.on('data', (c) => { lStderr += c.toString(); });
-          localProc.on('close', (code) => {
-            resolve({
-              stdout: lStdout.trim(),
-              stderr: lStderr.trim(),
-              exitCode: code ?? 0,
-              durationMs: Date.now() - startTime,
-            });
-          });
-          return;
-        }
-
-        resolve({
-          stdout,
-          stderr: stderr + `\n[Sandbox Error]: Execution timed out after ${timeoutMs}ms.`,
-          exitCode: 124,
-          durationMs: Date.now() - startTime,
-        });
-      }
-    }, timeoutMs);
-
-    childProc.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    childProc.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    childProc.on('error', () => {
-      if (!isSettled) {
-        isSettled = true;
-        clearTimeout(timer);
-        const localProc = spawn(fallbackCmd, fallbackArgs);
-        let lStdout = '';
-        let lStderr = '';
-        localProc.stdout?.on('data', (c) => { lStdout += c.toString(); });
-        localProc.stderr?.on('data', (c) => { lStderr += c.toString(); });
-        localProc.on('close', (code) => {
-          resolve({
-            stdout: lStdout.trim(),
-            stderr: lStderr.trim(),
-            exitCode: code ?? 0,
-            durationMs: Date.now() - startTime,
-          });
-        });
-      }
-    });
-
-    childProc.on('close', (code) => {
-      if (!isSettled) {
-        if (code !== 0 && (stderr.includes('Unable to find image') || stderr.includes('Pulling'))) {
-          isSettled = true;
-          clearTimeout(timer);
-          const localProc = spawn(fallbackCmd, fallbackArgs);
-          let lStdout = '';
-          let lStderr = '';
-          localProc.stdout?.on('data', (c) => { lStdout += c.toString(); });
-          localProc.stderr?.on('data', (c) => { lStderr += c.toString(); });
-          localProc.on('close', (lCode) => {
-            resolve({
-              stdout: lStdout.trim(),
-              stderr: lStderr.trim(),
-              exitCode: lCode ?? 0,
-              durationMs: Date.now() - startTime,
-            });
-          });
-          return;
-        }
-
-        isSettled = true;
-        clearTimeout(timer);
-        resolve({
-          stdout: stdout.trim(),
-          stderr: stderr.trim(),
-          exitCode: code ?? 0,
-          durationMs: Date.now() - startTime,
-        });
-      }
-    });
-  });
+  return dockerRes;
 }

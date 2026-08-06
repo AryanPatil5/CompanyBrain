@@ -55,6 +55,6 @@ export async function runPersistentStoreTest(): Promise<boolean> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runPersistentStoreTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

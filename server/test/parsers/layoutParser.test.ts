@@ -96,6 +96,6 @@ Primary column description text here.   Secondary column notes and information h
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runLayoutParserTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

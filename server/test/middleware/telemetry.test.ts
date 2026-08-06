@@ -52,6 +52,6 @@ export async function runTelemetryTest(): Promise<boolean> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runTelemetryTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

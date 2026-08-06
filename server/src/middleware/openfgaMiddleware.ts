@@ -1,8 +1,9 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from './auth.js';
-import { openfgaClientManager, OpenFGATuple } from '../services/security/openfgaClient.js';
+import { openfgaClientManager, type OpenFGATuple } from '../services/security/openfgaClient.js';
 
-export { openfgaClientManager, OpenFGATuple };
+export { openfgaClientManager };
+export type { OpenFGATuple };
 
 /**
  * Express Middleware enforcing OpenFGA Relationship-Based Access Control (ReBAC).

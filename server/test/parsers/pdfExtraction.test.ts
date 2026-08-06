@@ -3,45 +3,35 @@ import { parseDocument } from '../../src/services/parsers/documentParser.js';
 
 /**
  * Creates a minimal syntactically valid PDF Buffer containing specified text.
+ * Xref offsets and startxref are computed from real byte positions so the
+ * generated document parses deterministically.
  */
 function createTestPdfBuffer(textContent: string): Buffer {
-  const streamContent = `BT /F1 12 Tf 50 700 Td (${textContent.replace(/[()]/g, '')}) Tj ET`;
-  const streamLength = streamContent.length;
+  const streamContent = `BT /F1 12 Tf 50 700 Td (${textContent.replace(/[()\\]/g, '')}) Tj ET`;
 
-  const pdfString = `%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
-endobj
-4 0 obj
-<< /Length ${streamLength} >>
-stream
-${streamContent}
-endstream
-endobj
-5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
-endobj
-xref
-0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000244 00000 n 
-0000000340 00000 n 
-trailer
-<< /Size 6 /Root 1 0 R >>
-startxref
-425
-%%EOF`;
+  const objects = [
+    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`,
+    `2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n`,
+    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n`,
+    `4 0 obj\n<< /Length ${streamContent.length} >>\nstream\n${streamContent}\nendstream\nendobj\n`,
+    `5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
+  ];
 
-  return Buffer.from(pdfString, 'binary');
+  let body = '%PDF-1.4\n';
+  const offsets: number[] = [0];
+  for (const obj of objects) {
+    offsets.push(Buffer.byteLength(body, 'binary'));
+    body += obj;
+  }
+
+  const xrefPos = Buffer.byteLength(body, 'binary');
+  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= objects.length; i++) {
+    xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+  }
+  xref += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
+
+  return Buffer.from(body + xref, 'binary');
 }
 
 export async function runPdfExtractionTest(): Promise<boolean> {
@@ -104,6 +94,6 @@ export async function runPdfExtractionTest(): Promise<boolean> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runPdfExtractionTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

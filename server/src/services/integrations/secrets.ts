@@ -25,10 +25,10 @@ function getEncryptionKey(): Buffer {
 /**
  * Encrypts sensitive OAuth token string using AES-256-GCM envelope encryption
  */
-export function encryptSecret(plaintext: string): string {
+export async function encryptSecret(plaintext: string): Promise<string> {
   if (!plaintext) return '';
   try {
-    const payload = encryptKms(plaintext);
+    const payload = await encryptKms(plaintext);
     return `enc:v2:${payload.iv}:${payload.authTag}:${payload.cipherText}`;
   } catch {
     const iv = crypto.randomBytes(12);
@@ -46,7 +46,7 @@ export function encryptSecret(plaintext: string): string {
 /**
  * Decrypts AES-256-GCM encrypted token string
  */
-export function decryptSecret(cipherText: string): string | null {
+export async function decryptSecret(cipherText: string): Promise<string | null> {
   if (!cipherText) return null;
   if (!cipherText.startsWith('enc:v2:')) {
     return cipherText.replace(/^enc:/, '');
@@ -62,7 +62,7 @@ export function decryptSecret(cipherText: string): string | null {
       cipherText: parts[4],
     };
 
-    return decryptKms(payload);
+    return await decryptKms(payload);
   } catch {
     try {
       const parts = cipherText.split(':');
@@ -92,7 +92,7 @@ export async function saveCredential(
   tokens: Record<string, any>
 ) {
   const jsonString = typeof tokens === 'string' ? tokens : JSON.stringify(tokens);
-  const encrypted = encryptSecret(jsonString);
+  const encrypted = await encryptSecret(jsonString);
 
   return storeIntegrationCredential({
     workspace_id: workspaceId,
@@ -165,8 +165,8 @@ export async function storeIntegrationCredential(params: {
         workspace_id,
         provider,
         external_org_id,
-        access_token_encrypted: access_token ? encryptSecret(access_token) : null,
-        refresh_token_encrypted: refresh_token ? encryptSecret(refresh_token) : null,
+        access_token_encrypted: access_token ? await encryptSecret(access_token) : null,
+        refresh_token_encrypted: refresh_token ? await encryptSecret(refresh_token) : null,
         scopes: scopes || [],
         connected_by_user_id,
         connected_at: new Date().toISOString(),
@@ -200,8 +200,8 @@ export async function getIntegrationCredential(workspaceId: string, provider: st
 
     if (!data) return null;
 
-    const accessToken = data.access_token_encrypted ? decryptSecret(data.access_token_encrypted) : null;
-    const refreshToken = data.refresh_token_encrypted ? decryptSecret(data.refresh_token_encrypted) : null;
+    const accessToken = data.access_token_encrypted ? await decryptSecret(data.access_token_encrypted) : null;
+    const refreshToken = data.refresh_token_encrypted ? await decryptSecret(data.refresh_token_encrypted) : null;
 
     return {
       ...data,

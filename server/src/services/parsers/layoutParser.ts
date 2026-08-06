@@ -15,24 +15,18 @@ export interface LayoutParseResult {
 }
 
 /**
- * Parses PDF documents preserving text layout boundaries and table detection using real PDF extraction.
+ * Converts tab-separated / multi-space aligned rows into Markdown table syntax.
+ * Shared by the PDF layout path and the plain-text fallback so table
+ * formatting is consistent across both.
  */
-export async function parsePdfWithLayout(fileBuffer: Buffer): Promise<LayoutParseResult> {
-  const pdfResult = await extractTextFromPdf(fileBuffer);
-
-  if (pdfResult.isScannedOcrRequired || pdfResult.error || !pdfResult.text) {
-    throw new Error(pdfResult.error || '[OCR Pipeline Required]: Scanned image PDF detected with missing text layer.');
-  }
-
-  const contentStr = pdfResult.text;
-
+export function convertTabularTextToMarkdown(contentStr: string): { markdownText: string; tablesExtracted: number } {
   const lines = contentStr.split('\n');
   const markdownLines: string[] = [];
   let tablesExtracted = 0;
   let inTable = false;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
 
     // Multi-column or tabular detection (tab-separated or multi-space aligned)
     const isTabular = line.includes('\t') || line.split(/\s{2,}/).length >= 2;
@@ -59,7 +53,40 @@ export async function parsePdfWithLayout(fileBuffer: Buffer): Promise<LayoutPars
     markdownLines.push(line);
   }
 
-  const markdownText = markdownLines.join('\n').trim();
+  return {
+    markdownText: markdownLines.join('\n').trim(),
+    tablesExtracted,
+  };
+}
+
+/**
+ * Parses PDF documents preserving text layout boundaries and table detection using real PDF extraction.
+ */
+export async function parsePdfWithLayout(fileBuffer: Buffer): Promise<LayoutParseResult> {
+  const pdfResult = await extractTextFromPdf(fileBuffer);
+
+  if (pdfResult.isScannedOcrRequired || pdfResult.error || !pdfResult.text) {
+    // Graceful fallback for buffers declared as PDF but containing plain text
+    // (e.g., corrupt files or mislabeled uploads). Real PDFs start with the
+    // '%PDF-' magic header; anything else is parsed as text instead of erroring.
+    const textContent = fileBuffer.toString('utf-8');
+    const meaningfulText = textContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+    if (!fileBuffer.subarray(0, 5).toString('utf-8').startsWith('%PDF-') && meaningfulText.length > 0) {
+      const { markdownText, tablesExtracted } = convertTabularTextToMarkdown(textContent);
+      return {
+        markdownText,
+        metadata: {
+          pageCount: 1,
+          tablesExtracted,
+          layoutStructure: 'structured_text',
+        },
+      };
+    }
+
+    throw new Error(pdfResult.error || '[OCR Pipeline Required]: Scanned image PDF detected with missing text layer.');
+  }
+
+  const { markdownText, tablesExtracted } = convertTabularTextToMarkdown(pdfResult.text);
 
   return {
     markdownText,

@@ -70,6 +70,6 @@ export async function runOpenApiCompilerTest(): Promise<boolean> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runOpenApiCompilerTest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

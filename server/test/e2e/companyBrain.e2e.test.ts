@@ -105,6 +105,6 @@ Secret_Rotation\tN/A\tYes (Critical)
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runCompanyBrainE2ETest().then((success) => {
-    if (!success) process.exit(1);
+    process.exit(success ? 0 : 1);
   });
 }

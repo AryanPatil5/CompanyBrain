@@ -62,7 +62,7 @@ export async function getPlatformOAuthConfig(provider: string) {
       .single();
 
     if (data && data.client_id) {
-      const decryptedSecret = data.client_secret_encrypted ? decryptSecret(data.client_secret_encrypted) : null;
+      const decryptedSecret = data.client_secret_encrypted ? await decryptSecret(data.client_secret_encrypted) : null;
       return {
         client_id: data.client_id,
         client_secret: decryptedSecret,
@@ -159,7 +159,7 @@ router.post('/platform-config/:provider', authenticate, requireRole(['admin']), 
     };
 
     if (client_secret) {
-      upsertPayload.client_secret_encrypted = encryptSecret(client_secret);
+      upsertPayload.client_secret_encrypted = await encryptSecret(client_secret);
     }
 
     const { error } = await supabase
@@ -326,8 +326,8 @@ router.get('/slack/callback', async (req: Request, res: Response): Promise<void>
     }
 
     const platformConfig = await getPlatformOAuthConfig('slack');
-    const clientId = platformConfig.client_id || '';
-    const clientSecret = platformConfig.client_secret || '';
+    const clientId = platformConfig?.client_id || '';
+    const clientSecret = platformConfig?.client_secret || '';
 
     let teamId = 'T_DEMO_SLACK_ORG';
     let accessToken = 'xoxb-mock-demo-slack-token';
