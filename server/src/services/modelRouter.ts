@@ -61,6 +61,7 @@ export async function routeCompletion(
             systemInstruction: fullSystemPrompt,
             temperature,
             maxOutputTokens: maxTokens,
+            httpOptions: { timeout: 15_000 },
           },
         });
 

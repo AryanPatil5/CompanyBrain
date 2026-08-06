@@ -48,6 +48,8 @@ function timeoutFor(provider: AIProviderName): number {
   return parseIntEnv(`AI_TIMEOUT_MS_${provider.toUpperCase()}`, CONFIG.timeoutMs);
 }
 
+const GEMINI_TIMEOUT_MS = Math.max(timeoutFor('gemini'), 15_000);
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
@@ -241,7 +243,7 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
 
   if (geminiClient && GEMINI_API_KEY) {
     adapters.set('gemini', async () =>
-      withTimeout(timeoutFor('gemini'), async (signal) => {
+      withTimeout(GEMINI_TIMEOUT_MS, async (signal) => {
         const response = await geminiClient!.models.generateContent({
           model: GEMINI_MODEL,
           contents: prompt,
@@ -249,7 +251,7 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
             systemInstruction: systemPrompt,
             temperature: 0.1,
             abortSignal: signal,
-            httpOptions: { timeout: timeoutFor('gemini') },
+            httpOptions: { timeout: GEMINI_TIMEOUT_MS },
           },
         });
         const text = response.text?.trim();
