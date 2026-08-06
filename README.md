@@ -107,11 +107,15 @@ Administrators can paste their own custom app credentials directly into the UI v
 - Under **Bot Token Scopes**, add `channels:history`, `channels:read`, `chat:write`.
 - Save Client ID and Client Secret into the **In-App Wizard** or `server/.env` (`SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`).
 
-#### 2. GitHub App Setup
+#### 2. GitHub App Setup (Production Connector)
 - Create a GitHub App at **Settings** -> **Developer settings** -> **GitHub Apps**.
-- Set **Webhook URL** to `{APP_BASE_URL}/api/ingestion/webhook/github`.
+- Set **Webhook URL** to `{APP_BASE_URL}/api/v1/webhooks/github`.
 - Set **Setup / Callback URL** to `{APP_BASE_URL}/api/integrations/github/callback`.
-- Save the App's URL slug into the **In-App Wizard** or `server/.env` (`GITHUB_APP_NAME`, `GITHUB_WEBHOOK_SECRET`).
+- Under **Repository permissions** grant: `contents` (read), `issues` (read), `pull_requests` (read), `discussions` (read), `metadata` (read), `webhooks` (read).
+- Under **Subscribe to events** select: `push`, `pull_request`, `issues`, `issue_comment`, `discussion`, `discussion_comment`, `release`, `repository`.
+- Generate a **private key** (PEM), note the **App ID**, and record the webhook **secret**.
+- Save into `server/.env`: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (or `GITHUB_APP_PRIVATE_KEY_PATH`), `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_NAME` (optional, used by the connect flow).
+- Optional tuning: `GITHUB_API_BASE_URL`, `GITHUB_SYNC_BATCH_SIZE`, `GITHUB_SYNC_CONCURRENCY`, `GITHUB_SYNC_FILE_SIZE_LIMIT_KB`, `GITHUB_SYNC_MAX_FILES_PER_RUN`, `GITHUB_SYNC_TIMEOUT_MS`.
 
 #### 3. Gmail OAuth Client Setup
 - Open [Google Cloud Console](https://console.cloud.google.com) -> **APIs & Services** -> **Credentials**.
@@ -145,6 +149,51 @@ npm run dev
 ```
 
 Open `http://localhost:3000` to view the **Glassmorphism Management UI**.
+
+---
+
+## 🐙 GitHub Connector
+
+Production-grade GitHub App connector (`server/src/connectors/github/`) that ingests repository knowledge into the same pipeline as every other source (`source_documents` + chunks via `persistSourceDocumentWithChunks`).
+
+**What gets indexed:** README, Markdown + text/code files (ignoring `node_modules`, `dist`, `build`, `vendor`, binaries, images, archives, lockfiles), issues, pull requests, discussions, release notes, and wiki pages. Every document carries `workspaceId`, `repositoryId`, `repositoryName`, `branch`, `commit`, `author`, `url`, `createdAt`, `updatedAt`, `permissions` (repo visibility), `source`.
+
+**Auth:** GitHub App JWT (RS256, ≤8 min) → per-installation access tokens, cached with 60s refresh margin. Secrets never leave the server.
+
+**Sync model:** initial (full tree + all conversations, resume tokens checkpointed to `github_sync_state` every 5s/phase) and incremental (SHA-based change detection via `github_indexed_documents`, deletions reconciled). Cursor pagination on every list call, 429/403 rate-limit handling with Retry-After + `x-ratelimit-reset` wait, jittered retries.
+
+**API** (admin only, mounted at `/api/github`):
+
+| Endpoint | Description |
+| :--- | :--- |
+| `GET /api/github/installations` | List installations of the GitHub App |
+| `GET /api/github/installations/:id/repositories` | List repositories for an installation |
+| `POST /api/github/sync` | Discover installations → enqueue initial sync for all repos |
+| `POST /api/github/repositories/:repositoryId/sync` | Incremental sync of one repository |
+| `GET /api/github/sync/status` | Queue status + per-repo sync state |
+
+**Webhooks:** GitHub App → `POST /api/v1/webhooks/github` (HMAC SHA-256 verified via `x-hub-signature-256`; signature failures are always rejected in production). Events (`push`, `pull_request`, `issues`, `issue_comment`, `discussion`, `discussion_comment`, `release`, `repository`) are mapped to `github-sync` BullMQ jobs and processed by `githubSyncWorker`.
+
+**Migrations:** `server/supabase/030_github_connector.sql` (`github_repositories`, `github_sync_state`, `github_indexed_documents`, all with tenant-isolation RLS).
+
+**Manual test (local):**
+```bash
+# 1. Apply migration 030 in Supabase SQL Editor.
+# 2. Set GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY(+PATH) in server/.env, restart server.
+# 3. List your app's installations (admin Bearer token):
+curl -H "Authorization: Bearer <token>" http://localhost:5001/api/github/installations
+# 4. Initial sync:
+curl -X POST -H "Authorization: Bearer <token>" http://localhost:5001/api/github/sync
+# 5. Watch the worker:
+curl -H "Authorization: Bearer <token>" http://localhost:5001/api/github/sync/status
+# 6. Webhook delivery (replay one from GitHub → Settings → Advanced of your App):
+curl -X POST http://localhost:5001/api/v1/webhooks/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: issues" \
+  -H "X-GitHub-Delivery: test-1" \
+  -H "X-Hub-Signature-256: sha256=<hex hmac of body with GITHUB_WEBHOOK_SECRET>" \
+  -d '{"action":"opened","installation":{"id":<installId>},"repository":{"id":<repoId>,"full_name":"owner/repo","name":"repo","owner":{"login":"owner"},"private":false,"default_branch":"main"},"issue":{"number":1,"title":"Test","user":{"login":"tester"},"html_url":"https://github.com/owner/repo/issues/1","created_at":"2026-01-01T00:00:00Z"}}'
+```
 
 ---
 

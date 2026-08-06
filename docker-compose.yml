@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: apache/age:latest
+    image: apache/age:release_PG16_1.6.0
     container_name: company_brain_postgres
     restart: unless-stopped
     ports:

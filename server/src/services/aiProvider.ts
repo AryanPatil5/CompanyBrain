@@ -53,11 +53,12 @@ const GEMINI_TIMEOUT_MS = Math.max(timeoutFor('gemini'), 15_000);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const ENABLE_OLLAMA = process.env.ENABLE_OLLAMA === 'true';
 const OLLAMA_HOST = (process.env.OLLAMA_HOST || process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/+$/, '');
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'inclusionai/ling-3.0-flash:free';
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '~deepseek/deepseek-v4-flash-latest';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 
 const OPENROUTER_REFERER = process.env.APP_BASE_URL || 'http://localhost:5001';
@@ -95,7 +96,7 @@ export class AIProviderAggregateError extends Error {
   constructor(errors: ProviderError[], cause?: unknown) {
     const details = errors.length > 0
       ? errors.map((e) => `[${e.provider}] ${e.message}`).join('; ')
-      : 'No AI providers are configured. Set GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or an OLLAMA_HOST.';
+      : 'No AI providers are configured. Set GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or set ENABLE_OLLAMA=true with an OLLAMA_HOST.';
     super(`All AI providers failed: ${details}`);
     this.name = 'AIProviderAggregateError';
     this.errors = errors;
@@ -106,20 +107,16 @@ export class AIProviderAggregateError extends Error {
 function normalizeError(provider: string, err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
 
-  // Temporary debugging (remove after fixing the issue)
-  console.error('\n========== RAW ERROR ==========');
-  console.error(err);
-
-  if (err instanceof Error) {
-    console.error('NAME   :', err.name);
-    console.error('MESSAGE:', err.message);
-    console.error('CAUSE  :', (err as any).cause);
-    console.error('STACK  :');
-    console.error(err.stack);
-  }
-
   const message = err instanceof Error ? err.message : String(err);
   const name = err instanceof Error ? err.name : '';
+
+  logger.debug('ai_provider_raw_error', {
+    provider,
+    name,
+    message,
+    cause: err instanceof Error ? (err as any).cause : undefined,
+    stack: err instanceof Error ? err.stack : undefined,
+  });
 
   const isAbort =
     name === 'AbortError' ||
@@ -128,7 +125,7 @@ function normalizeError(provider: string, err: unknown): ProviderError {
 
   if (isAbort) {
     return new ProviderError(provider, `${provider} request timed out`, {
-      retryable: false,
+      retryable: true,
     });
   }
 
@@ -206,7 +203,7 @@ async function throwForHttpStatus(provider: AIProviderName, res: Response): Prom
   if (res.status === 429) {
     const retryAfterSec = Number.parseInt(res.headers.get('retry-after') ?? '', 10);
     const retryAfterMs = Number.isFinite(retryAfterSec) ? retryAfterSec * 1000 : undefined;
-    throw new ProviderError(provider, `${provider} rate limited (HTTP 429)`, { status: 429, retryable: true, retryAfterMs });
+    throw new ProviderError(provider, `${provider} quota exceeded (HTTP 429)`, { status: 429, retryable: false, retryAfterMs });
   }
   if (res.status >= 500) {
     throw new ProviderError(provider, `${provider} returned HTTP ${res.status} ${res.statusText}`, { status: res.status, retryable: true });
@@ -315,25 +312,27 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
     );
   }
 
-  adapters.set('ollama', async () =>
-    withTimeout(timeoutFor('ollama'), async (signal) => {
-      const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal,
-        body: JSON.stringify({
-          model: OLLAMA_MODEL,
-          prompt: `${systemPrompt}\n\n${prompt}`,
-          stream: false,
-        }),
-      });
-      if (!res.ok) await throwForHttpStatus('ollama', res);
-      const data = await res.json();
-      const text = typeof data.response === 'string' ? data.response.trim() : '';
-      if (!text) throw new ProviderError('ollama', 'Ollama returned an empty response', { retryable: false });
-      return text;
-    }),
-  );
+  if (ENABLE_OLLAMA) {
+    adapters.set('ollama', async () =>
+      withTimeout(timeoutFor('ollama'), async (signal) => {
+        const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal,
+          body: JSON.stringify({
+            model: OLLAMA_MODEL,
+            prompt: `${systemPrompt}\n\n${prompt}`,
+            stream: false,
+          }),
+        });
+        if (!res.ok) await throwForHttpStatus('ollama', res);
+        const data = await res.json();
+        const text = typeof data.response === 'string' ? data.response.trim() : '';
+        if (!text) throw new ProviderError('ollama', 'Ollama returned an empty response', { retryable: false });
+        return text;
+      }),
+    );
+  }
 
   return adapters;
 }
@@ -343,7 +342,10 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
 export async function generateText(prompt: string, systemPrompt?: string): Promise<string> {
   const fullSystemPrompt = systemPrompt || 'You are an Enterprise Knowledge AI Assistant.';
   const adapters = buildAdapters(prompt, fullSystemPrompt);
-  const enabled = CONFIG.priority.filter((provider) => adapters.has(provider));
+  let enabled = CONFIG.priority.filter((provider) => adapters.has(provider));
+  if (adapters.has('openrouter')) {
+    enabled = ['openrouter', ...enabled.filter((provider) => provider !== 'openrouter')];
+  }
 
   if (enabled.length === 0) {
     const error = new AIProviderAggregateError([]);

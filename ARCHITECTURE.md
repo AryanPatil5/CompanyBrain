@@ -350,6 +350,28 @@ flowchart TD
     R --> S[Mark raw_threads is_processed=true]
 ```
 
+### 5.3 GitHub Connector Event Flow
+
+The GitHub connector (`server/src/connectors/github/`) is a standalone ingestion path that feeds the same `source_documents` / `document_chunks` pipeline via `persistSourceDocumentWithChunks` (no LLM in the request path).
+
+```mermaid
+flowchart LR
+    A[GitHub App webhook<br/>POST /api/v1/webhooks/github] --> B[verifyWebhookSignature<br/>x-hub-signature-256 HMAC]
+    B --> C{GitHubAppAuth<br/>JWT + installation token}
+    B --> D[GithubWebhookHandler<br/>parseEvent → action]
+    D --> E[github-sync BullMQ queue]
+    E --> F[githubSyncWorker<br/>concurrency=2]
+    F --> G[GithubSyncService<br/>tree/issues/pulls/discussions/releases/wiki]
+    G --> H[persistSourceDocumentWithChunks<br/>source_documents + chunks]
+    G --> I[github_indexed_documents<br/>SHA change detection]
+    G --> J[github_sync_state<br/>resume tokens]
+```
+
+- Webhook events: `push`, `pull_request`, `issues`, `issue_comment`, `discussion`, `discussion_comment`, `release`, `repository` (+ installation lifecycle).
+- Admin API mounted at `/api/github` (installations, repositories, sync trigger, sync status).
+- Rate limits: 429/403 handling via `Retry-After` / `x-ratelimit-reset`, cursor pagination on all list calls, jittered exponential retries.
+- Document metadata: `workspaceId`, `repositoryId`, `repositoryName`, `branch`, `commit`, `author`, `url`, `createdAt`, `updatedAt`, `permissions`, `source`.
+
 ### 5.2 BullMQ Ingestion Job Flow
 
 ```mermaid
@@ -700,6 +722,7 @@ Migrations are applied in filename order. Key schema evolution:
 | `026_temporal_graph_schema.sql` | Temporal graph schema |
 | `027_source_documents_chunks_and_schema_repairs.sql` | `source_documents` + `document_chunks` tables |
 | `028_fix_migration_order.sql` | Fix migration ordering issues |
+| `030_github_connector.sql` | GitHub connector: `github_repositories`, `github_sync_state`, `github_indexed_documents` (RLS, SHA-based change detection) |
 
 ---
 
@@ -735,7 +758,16 @@ flowchart TB
     P --> Q[Log to ingestion_failures]
 ```
 
-### 9.2 Temporal Agent Workflow
+### 9.2 GitHub Sync Worker
+
+`githubSyncWorker` (started by `startGithubSyncWorker()`, also spawnable via `bootstrap.ts` process `github-sync-worker`) consumes the `github-sync` queue:
+
+- `sync_installation` — list installations → upsert `github_repositories` → enqueue `sync_repository` (initial) per repo with 500ms stagger.
+- `sync_repository` — run `GithubSyncService.syncRepository` (initial or incremental via `GithubSyncKind`); resume tokens checkpointed to `github_sync_state` every 5s / on phase completion; retries 3 with 2s exponential backoff.
+- `webhook_event` — `GithubWebhookHandler.handleEvent` (signature already verified at the route; installation mapping via `resolveWorkspaceForWebhook`).
+- All job outcomes audited to `execution_logs` / failures to `ingestion_failures`.
+
+### 9.3 Temporal Agent Workflow
 
 ```mermaid
 flowchart TB
@@ -752,7 +784,7 @@ flowchart TB
     J -->|No| L[Return completed]
 ```
 
-### 9.3 Background Crawler
+### 9.4 Background Crawler
 
 - Runs on server boot (`startCrawlerWorker()`)
 - `setInterval` with configurable `CRAWL_INTERVAL_MS` (default 1 hour)
