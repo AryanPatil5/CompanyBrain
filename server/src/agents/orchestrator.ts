@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { supabase } from '../config/supabase.js';
 import { generatePlan } from './planner.js';
 import { auditPlan } from './auditor.js';
@@ -44,7 +45,7 @@ export async function runWorkflow(
     : await generatePlan(userQuery, context);
 
 
-  let initialState: ExecutionResult = {
+  const initialState: ExecutionResult = {
     workflow_id: workflowId,
     status: 'completed',
     plan,
@@ -110,7 +111,7 @@ export async function runWorkflow(
         approvalId = ticket.id;
       }
     } catch (err) {
-      console.warn('[17] Supabase insert failed:', err);
+      logger.warn('[17] Supabase insert failed:', err);
     }
 
     const pausedResult: ExecutionResult = {
@@ -163,7 +164,7 @@ export async function runWorkflow(
         .eq('id', context.approvalId);
 
     } catch (err) {
-      console.warn('[22] Approval validation failed:', err);
+      logger.warn('[22] Approval validation failed:', err);
     }
   }
 
@@ -183,10 +184,12 @@ export async function runWorkflow(
 
   const hasErrors = executedSteps.some((s) => s.outcome === 'error');
 
-  currentLifecycle = transitionState(
+  // Final transition result is intentionally discarded: executePlan returns
+  // immediately after, so the lifecycle store never reads it again.
+  void transitionState(
     currentLifecycle,
     hasErrors ? 'FAILED' : 'COMPLETED'
-  ).to;
+  );
 
   const finalResult: ExecutionResult = {
     workflow_id: workflowId,

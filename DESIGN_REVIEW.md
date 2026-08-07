@@ -270,7 +270,7 @@
 
 | Debt | Roadmap Phase | Status |
 |------|---------------|--------|
-| Apache AGE removal | Not explicit | ADR-T4 says retire; no phase does it |
+| Apache AGE removal | Phase 0 (ADR-T4) | Removed in Phase 0 Task 3 (extension, RPC, compose image) |
 | Pseudo-vector removal | Phase 4 (provider swap) | But fallback remains in code |
 | OpenFGA in-memory replacement | Phase 5 | Too late; needed in Phase 1 |
 | ABAC middleware wiring | Phase 5 | Not on all routes |
@@ -278,7 +278,7 @@
 | Single-process split | Phase 8 | Too late (Week 13+) |
 | Schema drift fixes | Phase 1 (029 only) | More drift inevitable |
 | `modelRouter.ts` integration | Never | Exists but unused |
-| `executeCypher` dead code | Never | RPC exists but unused |
+| `executeCypher` dead code | Phase 0 (ADR-T4) | Removed in Phase 0 Task 3; relational traversal only |
 | CIDR substring bug | Never | Security vulnerability |
 
 ---

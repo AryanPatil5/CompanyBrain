@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { supabase } from '../../config/supabase.js';
 import { getConnectedEntities } from '../graph/graphService.js';
 import { canonicalizeEntity } from '../graph/entityDisambiguator.js';
@@ -18,7 +19,8 @@ export interface GraphFusionUserContext {
 
 /**
  * GraphRAG Traversal Fusion Service with Document-Level Access Control (DLAC) & Temporal Validity Decay
- * Extracts named entities from user query, traverses 2-hop graph paths in Apache AGE / pg graph,
+ * Extracts named entities from user query, traverses 2-hop graph paths in the relational
+ * graph tables (graph_nodes / graph_edges),
  * applies temporal decay scoring, and filters out expired/restricted nodes before constructing context text.
  */
 export async function extractEntitiesAndTraverse(
@@ -74,7 +76,7 @@ export async function extractEntitiesAndTraverse(
       }
     }
   } catch (err) {
-    console.warn('[GraphFusion Warning] Database graph_nodes query fallback:', err);
+    logger.warn('[GraphFusion Warning] Database graph_nodes query fallback:', err);
   }
 
   if (matchedNodeIds.size === 0) {
@@ -95,7 +97,7 @@ export async function extractEntitiesAndTraverse(
         fetchedNodes.push(scoredNode);
       }
     } catch (err) {
-      console.warn(`[GraphFusion Warning] Traversal failed for entity "${entityId}":`, err);
+      logger.warn(`[GraphFusion Warning] Traversal failed for entity "${entityId}":`, err);
     }
   }
 

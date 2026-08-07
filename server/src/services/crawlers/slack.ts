@@ -1,8 +1,10 @@
+import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
 import { extractSOPFromThread } from '../extractor.js';
 import { createVersion } from '../freshness.js';
-import { generateEmbedding } from '../embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
+import { ssrfSafeFetch } from '../security/ssrfGuard.js';
 import { handleRateLimitResponse } from '../../queue/rateLimiter.js';
 
 dotenv.config();
@@ -81,7 +83,7 @@ async function markSlackThreadCrawledBatch(
   try {
     await supabase.from('crawled_sources').insert(entries);
   } catch (err) {
-    console.warn('[Slack Crawler] Failed batch deduplication insert:', err);
+    logger.warn('[Slack Crawler] Failed batch deduplication insert:', err);
   }
 }
 
@@ -94,7 +96,7 @@ export async function* fetchSlackMessagesStream(channelId: string): AsyncGenerat
   let attempt = 1;
   while (attempt <= 3) {
     try {
-      const response = await fetch(historyUrl, {
+      const response = await ssrfSafeFetch(historyUrl, {
         headers: {
           'Authorization': `Bearer ${SLACK_BOT_TOKEN}`,
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -109,13 +111,13 @@ export async function* fetchSlackMessagesStream(channelId: string): AsyncGenerat
       }
 
       if (!response.ok) {
-        console.warn(`[WARN] [Slack Crawler] Web API error (${response.status}): ${await response.text()}`);
+        logger.warn(`[WARN] [Slack Crawler] Web API error (${response.status}): ${await response.text()}`);
         return;
       }
 
       const data = (await response.json()) as any;
       if (!data.ok) {
-        console.warn(`[WARN] [Slack Crawler] Slack API error: ${data.error || 'Unknown error'}`);
+        logger.warn(`[WARN] [Slack Crawler] Slack API error: ${data.error || 'Unknown error'}`);
         return;
       }
 
@@ -125,7 +127,7 @@ export async function* fetchSlackMessagesStream(channelId: string): AsyncGenerat
       }
       return;
     } catch (err) {
-      console.warn('[Slack Crawler] Network error during message stream:', err);
+      logger.warn('[Slack Crawler] Network error during message stream:', err);
       attempt++;
     }
   }
@@ -139,11 +141,11 @@ export async function crawlSlackHistory(
   workspaceId: string = '00000000-0000-0000-0000-000000000000'
 ): Promise<SlackCrawlResult> {
   if (!SLACK_BOT_TOKEN) {
-    console.log('[INFO] [Slack Crawler] SLACK_BOT_TOKEN not configured. Skipping active Slack history sweep.');
+    logger.info('[INFO] [Slack Crawler] SLACK_BOT_TOKEN not configured. Skipping active Slack history sweep.');
     return { source: 'slack', channel: channelId, threads_crawled: 0, sops_extracted: 0, status: 'skipped' };
   }
 
-  console.log(`[INFO] [Slack Crawler] Sweeping channel history for Slack channel: ${channelId}...`);
+  logger.info(`[INFO] [Slack Crawler] Sweeping channel history for Slack channel: ${channelId}...`);
 
   let threadsCrawled = 0;
   let sopsExtracted = 0;
@@ -163,7 +165,7 @@ export async function crawlSlackHistory(
         let threadMessages: SlackMessage[] = [];
         try {
           const repliesUrl = `https://slack.com/api/conversations.replies?channel=${channelId}&ts=${parent.ts}`;
-          const repliesRes = await fetch(repliesUrl, {
+          const repliesRes = await ssrfSafeFetch(repliesUrl, {
             headers: {
               'Authorization': `Bearer ${SLACK_BOT_TOKEN}`,
               'Content-Type': 'application/x-www-form-urlencoded',
@@ -183,7 +185,7 @@ export async function crawlSlackHistory(
             }
           }
         } catch (replyErr) {
-          console.warn(`[WARN] [Slack Crawler] Failed to fetch replies for thread ${parent.ts}:`, replyErr);
+          logger.warn(`[WARN] [Slack Crawler] Failed to fetch replies for thread ${parent.ts}:`, replyErr);
           threadMessages = [{ user: parent.user || 'slack_user', text: parent.text || '', ts: parent.ts }];
         }
 
@@ -202,7 +204,18 @@ export async function crawlSlackHistory(
         try {
           const extractedSOP = await extractSOPFromThread(threadMessages, workspaceId, 'slack');
           if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
-            const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+            let sopEmbedding: number[] | null = null;
+            try {
+              sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+            } catch (embErr) {
+              await recordEmbeddingFailure({
+                workspaceId,
+                source: 'slack',
+                rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
+                error: embErr,
+              });
+              throw embErr;
+            }
 
             const insertPayload: Record<string, any> = {
               workspace_id: workspaceId,
@@ -233,7 +246,8 @@ export async function crawlSlackHistory(
             }
           }
         } catch (extractErr) {
-          console.warn(`[WARN] [Slack Crawler] Extraction skipped for thread ${parent.ts}:`, (extractErr as Error).message);
+          if (extractErr instanceof EmbeddingError) throw extractErr;
+          logger.warn(`[WARN] [Slack Crawler] Extraction skipped for thread ${parent.ts}:`, (extractErr as Error).message);
         }
 
         deduplicationBatch.push({ source: 'slack', external_id: threadTs, target: channelId, workspace_id: workspaceId });
@@ -251,7 +265,7 @@ export async function crawlSlackHistory(
 
     return { source: 'slack', channel: channelId, threads_crawled: threadsCrawled, sops_extracted: sopsExtracted, status: 'success' };
   } catch (err) {
-    console.error('[ERROR] [Slack Crawler] Error during crawl execution:', err);
+    logger.error('[ERROR] [Slack Crawler] Error during crawl execution:', err);
     return { source: 'slack', channel: channelId, threads_crawled: threadsCrawled, sops_extracted: sopsExtracted, status: 'error' };
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { Redis } from 'ioredis';
 import dotenv from 'dotenv';
 import { ExecutionResult } from './types.js';
@@ -18,7 +19,7 @@ agentRedisClient.on('error', (err) => {
   if ((err as any).code === 'ECONNREFUSED') {
     // Suppress warning during offline local dev tests
   } else {
-    console.error('[PersistentStore Redis Error]:', err);
+    logger.error('[PersistentStore Redis Error]:', err);
   }
 });
 
@@ -50,7 +51,7 @@ export async function saveWorkflowState(
 } catch {
   // Redis unavailable. In-memory state is already saved.
 }
-  } catch (err) {
+  } catch {
     // Redis offline fallback
   }
 }
@@ -66,7 +67,7 @@ export async function getWorkflowState(workflowId: string): Promise<ExecutionRes
     if (data) {
       return JSON.parse(data);
     }
-  } catch (err) {
+  } catch {
     // Redis offline fallback
   }
 

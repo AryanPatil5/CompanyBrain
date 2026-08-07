@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { Router, Request, Response } from 'express';
 import { supabase } from '../config/supabase.js';
 import { extractSOPFromThread } from '../services/extractor.js';
@@ -16,13 +17,12 @@ import {
   verifySlackSignature,
   verifyGitHubSignature,
   verifyLinearSignature,
-  resolveWorkspaceForWebhook,
   resolveSlackWorkspaceMiddleware,
   resolveGitHubWorkspaceMiddleware,
   resolveLinearWorkspaceMiddleware,
 } from './connectors.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
-import { generateEmbedding } from '../services/embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure } from '../services/embeddings.js';
 import { getTenantClient } from '../middleware/tenantClient.js';
 import { ingestionLimiter, webhookLimiter } from '../middleware/rateLimiter.js';
 import { ingestionQueue } from '../queue/ingestionQueue.js';
@@ -40,7 +40,7 @@ async function processThread(
   const { workspace_id, source, external_thread_id, channel_or_project, messages } = payload;
   const client = req ? getTenantClient(req) : supabase;
 
-  console.log(`[Ingestion] Received ${source} webhook (trust: ${sourceTrust}) for thread/source: ${external_thread_id}`);
+  logger.info(`[Ingestion] Received ${source} webhook (trust: ${sourceTrust}) for thread/source: ${external_thread_id}`);
 
   // Store raw thread
   const { data: rawThread, error: rawErr } = await client
@@ -57,7 +57,7 @@ async function processThread(
     .single();
 
   if (rawErr) {
-    console.error('[Ingestion Error] Failed to store raw thread:', rawErr);
+    logger.error('[Ingestion Error] Failed to store raw thread:', rawErr);
     res.status(500).json({ error: 'Database storage error for raw thread.' });
     return;
   }
@@ -81,7 +81,7 @@ async function processThread(
   let extractedSOP;
   try {
     extractedSOP = await extractSOPFromThread(messages, workspace_id, source, sourceTrust);
-  } catch (extractErr) {
+  } catch {
     res.status(422).json({
       success: false,
       error: 'SOP extraction failed schema validation',
@@ -105,7 +105,7 @@ async function processThread(
   );
 
   if (conflict.has_conflict && conflict.matching_sop_id) {
-    console.log(`[Ingestion] Conflict detected with SOP "${conflict.matching_sop_title}" (similarity: ${conflict.similarity_score})`);
+    logger.info(`[Ingestion] Conflict detected with SOP "${conflict.matching_sop_title}" (similarity: ${conflict.similarity_score})`);
 
     await supabase.from('sop_citations').insert({
       sop_id: conflict.matching_sop_id,
@@ -127,8 +127,21 @@ async function processThread(
     return;
   }
 
-  // Generate vector embedding for the SOP
-  const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+  // Generate vector embedding for the SOP — never insert an SOP without one.
+  // On failure, mark the ingestion state and rethrow so the webhook fails loudly
+  // (and is retried by the sender / queue).
+  let sopEmbedding: number[] | null = null;
+  try {
+    sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+  } catch (embErr) {
+    await recordEmbeddingFailure({
+      workspaceId: workspace_id,
+      source,
+      rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
+      error: embErr,
+    });
+    throw embErr;
+  }
 
   // Save as Draft SOP with Risk Level, Human Gate Policy, and vector embedding
   const insertPayload: Record<string, any> = {
@@ -158,7 +171,7 @@ async function processThread(
     .single();
 
   if (sopErr && (sopErr.message.includes('embedding') || sopErr.message.includes('risk_level') || sopErr.message.includes('column'))) {
-    console.warn('[Ingestion Warning] Column missing in schema, inserting without extended vector/risk columns.');
+    logger.warn('[Ingestion Warning] Column missing in schema, inserting without extended vector/risk columns.');
     delete insertPayload.embedding;
     delete insertPayload.risk_level;
     delete insertPayload.requires_human_gate;
@@ -174,7 +187,7 @@ async function processThread(
   }
 
   if (sopErr || !sopData) {
-    console.error('[Ingestion Error] Failed to store SOP draft:', sopErr);
+    logger.error('[Ingestion Error] Failed to store SOP draft:', sopErr);
     res.status(500).json({ error: 'Failed to create SOP record.' });
     return;
   }
@@ -190,7 +203,7 @@ async function processThread(
 
   await supabase.from('raw_threads').update({ is_processed: true }).eq('id', rawThread.id);
 
-  console.log(`[Ingestion Success] Created Draft SOP "${sopData.title}" (ID: ${sopData.id}) [Risk: ${sopData.risk_level}]`);
+  logger.info(`[Ingestion Success] Created Draft SOP "${sopData.title}" (ID: ${sopData.id}) [Risk: ${sopData.risk_level}]`);
 
   res.status(201).json({
     message: 'SOP draft successfully generated and linked.',
@@ -211,7 +224,7 @@ router.post('/webhook', verifySlackSignature, resolveSlackWorkspaceMiddleware(),
     }
     await processThread(payload, res, req, 'crawled');
   } catch (error) {
-    console.error('[Ingestion Error]:', error);
+    logger.error('[Ingestion Error]:', error);
     res.status(500).json({ error: 'Internal server error during ingestion.' });
   }
 });
@@ -224,7 +237,7 @@ router.post('/webhook/github', verifyGitHubSignature, resolveGitHubWorkspaceMidd
       return;
     }
     await processThread(payload, res, req, 'crawled');
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Internal server error during GitHub ingestion.' });
   }
 });
@@ -237,7 +250,7 @@ router.post('/webhook/linear', verifyLinearSignature, resolveLinearWorkspaceMidd
       return;
     }
     await processThread(payload, res, req, 'crawled');
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Internal server error during Linear ingestion.' });
   }
 });
@@ -254,7 +267,7 @@ router.post('/webhook/zendesk', authenticate, ingestionLimiter, async (req: Requ
       return;
     }
     await processThread(payload, res, req, 'crawled');
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Internal server error during Zendesk ingestion.' });
   }
 });
@@ -271,7 +284,7 @@ router.post('/webhook/email', authenticate, ingestionLimiter, async (req: Reques
       return;
     }
     await processThread(payload, res, req, 'crawled');
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Internal server error during Email ingestion.' });
   }
 });
@@ -288,7 +301,7 @@ router.post('/webhook/database', authenticate, ingestionLimiter, async (req: Req
       return;
     }
     await processThread(payload, res, req, 'crawled');
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Internal server error during Database ingestion.' });
   }
 });
@@ -306,7 +319,7 @@ router.post('/webhook/teach', authenticate, ingestionLimiter, async (req: Reques
     }
     await processThread(payload, res, req, 'manual');
   } catch (error) {
-    console.error('[Direct Teach Ingestion Error]:', error);
+    logger.error('[Direct Teach Ingestion Error]:', error);
     res.status(500).json({ error: 'Internal server error during Tacit Knowledge ingestion.' });
   }
 });
@@ -342,7 +355,7 @@ router.post('/run', authenticate, ingestionLimiter, async (req: Request, res: Re
         jobId = String(job.id);
       }
     } catch (queueErr) {
-      console.warn('[Ingestion Queue Warning] Failed to enqueue to Redis BullMQ, returning fallback jobId:', queueErr);
+      logger.warn('[Ingestion Queue Warning] Failed to enqueue to Redis BullMQ, returning fallback jobId:', queueErr);
     }
 
     res.status(202).json({
@@ -352,7 +365,7 @@ router.post('/run', authenticate, ingestionLimiter, async (req: Request, res: Re
       message: 'Ingestion job enqueued successfully.',
     });
   } catch (error) {
-    console.error('[Ingestion Run Error]:', error);
+    logger.error('[Ingestion Run Error]:', error);
     res.status(500).json({ error: 'Internal server error while queueing ingestion job.' });
   }
 });
@@ -384,7 +397,7 @@ router.get('/jobs/:jobId', authenticate, async (req: Request, res: Response): Pr
       returnvalue: job.returnvalue || null,
       created_at: new Date(job.timestamp).toISOString(),
     });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Internal server error fetching job status.' });
   }
 });
@@ -455,7 +468,7 @@ Return ONLY raw JSON matching this schema:
       questions: parsed.questions,
     });
   } catch (err) {
-    console.error('[Interview Elicitation Error]:', err);
+    logger.error('[Interview Elicitation Error]:', err);
     res.status(502).json({
       success: false,
       error: 'Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually.',

@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { generateText } from '../aiProvider.js';
 import { SopAST, SopASTInput, SopASTStep } from './sopTypes.js';
 
@@ -32,7 +33,7 @@ export function validateSopAst(ast: SopAST): { valid: boolean; errors: string[] 
  */
 export async function compileSopToAst(
   markdownText: string,
-  options?: { sopId?: string; title?: string }
+  options?: { sopId?: string; title?: string; workspaceId?: string }
 ): Promise<SopAST> {
   const sopId = options?.sopId || `sop_ast_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const cleanMd = markdownText.trim();
@@ -133,7 +134,7 @@ ${cleanMd}
 Return JSON with structure:
 {"title": "string", "triggerCondition": "string", "steps": [{"stepNumber": number, "action": "string", "targetSystem": "string", "requiresHumanApproval": boolean}]}`;
 
-    const llmOut = await generateText(prompt, 'You are an Enterprise SOP AST Compiler.');
+    const llmOut = await generateText(prompt, 'You are an Enterprise SOP AST Compiler.', { workspaceId: options?.workspaceId, purpose: 'sop_compile' });
     const jsonMatch = llmOut.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
@@ -149,7 +150,7 @@ Return JSON with structure:
       }
     }
   } catch (llmErr) {
-    console.warn('[SopCompiler Warning] LLM AST refinement error, using rule-based AST:', llmErr);
+    logger.warn('[SopCompiler Warning] LLM AST refinement error, using rule-based AST:', llmErr);
   }
 
   return ast;

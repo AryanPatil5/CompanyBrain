@@ -1,9 +1,11 @@
+import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
 import { extractSOPFromThread } from '../extractor.js';
 import { createVersion } from '../freshness.js';
-import { generateEmbedding } from '../embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
 import { getIntegrationCredential, storeIntegrationCredential } from '../integrations/secrets.js';
+import { ssrfSafeFetch } from '../security/ssrfGuard.js';
 
 dotenv.config();
 
@@ -39,7 +41,7 @@ async function markEmailThreadCrawled(emailId: string, inbox: string): Promise<v
       target: inbox,
     });
   } catch (err) {
-    console.warn('[Email Crawler] Failed to record deduplication entry:', err);
+    logger.warn('[Email Crawler] Failed to record deduplication entry:', err);
   }
 }
 
@@ -52,8 +54,8 @@ async function refreshGmailAccessToken(workspaceId: string, refreshToken: string
   if (!clientId || !clientSecret || !refreshToken) return null;
 
   try {
-    console.log(`[Email Crawler] Refreshing expired Gmail OAuth access token for workspace ${workspaceId}...`);
-    const res = await fetch('https://oauth2.googleapis.com/token', {
+    logger.info(`[Email Crawler] Refreshing expired Gmail OAuth access token for workspace ${workspaceId}...`);
+    const res = await ssrfSafeFetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -65,7 +67,7 @@ async function refreshGmailAccessToken(workspaceId: string, refreshToken: string
     });
 
     if (!res.ok) {
-      console.warn('[Email Crawler] Token refresh failed:', await res.text());
+      logger.warn('[Email Crawler] Token refresh failed:', await res.text());
       return null;
     }
 
@@ -80,11 +82,11 @@ async function refreshGmailAccessToken(workspaceId: string, refreshToken: string
         access_token: newAccessToken,
         refresh_token: refreshToken,
       });
-      console.log(`[Email Crawler] Successfully refreshed and updated Gmail OAuth token for workspace ${workspaceId}`);
+      logger.info(`[Email Crawler] Successfully refreshed and updated Gmail OAuth token for workspace ${workspaceId}`);
       return newAccessToken;
     }
   } catch (err) {
-    console.error('[Email Crawler] Exception during token refresh:', err);
+    logger.error('[Email Crawler] Exception during token refresh:', err);
   }
 
   return null;
@@ -112,18 +114,18 @@ export async function crawlEmailInbox(
   }
 
   if (!effectiveToken) {
-    console.log('[INFO] [Email Crawler] GMAIL_API_TOKEN / Gmail OAuth token not configured. Skipping active email inbox sweep.');
+    logger.info('[INFO] [Email Crawler] GMAIL_API_TOKEN / Gmail OAuth token not configured. Skipping active email inbox sweep.');
     return { source: 'email', inbox, threads_crawled: 0, sops_extracted: 0, status: 'skipped' };
   }
 
-  console.log(`[INFO] [Email Crawler] Sweeping shared inbox threads for: ${inbox} (Workspace: ${workspaceId})...`);
+  logger.info(`[INFO] [Email Crawler] Sweeping shared inbox threads for: ${inbox} (Workspace: ${workspaceId})...`);
 
   let sopsExtracted = 0;
   let threadsCrawled = 0;
 
   try {
     const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=label:ops-runbook+OR+subject:incident&maxResults=20`;
-    let response = await fetch(url, {
+    let response = await ssrfSafeFetch(url, {
       headers: {
         'Authorization': `Bearer ${effectiveToken}`,
         'Accept': 'application/json',
@@ -135,7 +137,7 @@ export async function crawlEmailInbox(
       const refreshedToken = await refreshGmailAccessToken(workspaceId, storedRefreshToken);
       if (refreshedToken) {
         effectiveToken = refreshedToken;
-        response = await fetch(url, {
+        response = await ssrfSafeFetch(url, {
           headers: {
             'Authorization': `Bearer ${effectiveToken}`,
             'Accept': 'application/json',
@@ -145,14 +147,14 @@ export async function crawlEmailInbox(
     }
 
     if (!response.ok) {
-      console.warn(`[WARN] [Email Crawler] API error (${response.status}): ${await response.text()}`);
+      logger.warn(`[WARN] [Email Crawler] API error (${response.status}): ${await response.text()}`);
       return { source: 'email', inbox, threads_crawled: 0, sops_extracted: 0, status: 'error' };
     }
 
     const data = (await response.json()) as any;
     const messages = data.messages || [];
 
-    console.log(`[INFO] [Email Crawler] Found ${messages.length} candidate email threads in inbox.`);
+    logger.info(`[INFO] [Email Crawler] Found ${messages.length} candidate email threads in inbox.`);
 
     for (const msgRef of messages) {
       const emailId = `email_${msgRef.id}`;
@@ -165,7 +167,7 @@ export async function crawlEmailInbox(
 
       let emailTranscript: Array<{ user: string; text: string }> = [];
       try {
-        const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgRef.id}`, {
+        const msgRes = await ssrfSafeFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgRef.id}`, {
           headers: { 'Authorization': `Bearer ${effectiveToken}` },
         });
 
@@ -181,7 +183,7 @@ export async function crawlEmailInbox(
           ];
         }
       } catch (fetchErr) {
-        console.warn(`[WARN] [Email Crawler] Failed to fetch details for email ${msgRef.id}:`, fetchErr);
+        logger.warn(`[WARN] [Email Crawler] Failed to fetch details for email ${msgRef.id}:`, fetchErr);
         continue;
       }
 
@@ -191,7 +193,18 @@ export async function crawlEmailInbox(
         const extractedSOP = await extractSOPFromThread(emailTranscript, workspaceId, 'email', 'crawled');
 
         if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
-          const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          let sopEmbedding: number[] | null = null;
+          try {
+            sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          } catch (embErr) {
+            await recordEmbeddingFailure({
+              workspaceId,
+              source: 'email',
+              rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
+              error: embErr,
+            });
+            throw embErr;
+          }
 
           const insertPayload: Record<string, any> = {
             workspace_id: workspaceId,
@@ -219,11 +232,12 @@ export async function crawlEmailInbox(
           if (!insertErr && sopData) {
             await createVersion(sopData.id, 'email_crawler', 'initial_extraction');
             sopsExtracted++;
-            console.log(`[SUCCESS] [Email Crawler] Extracted SOP "${sopData.title}" from Email ${msgRef.id}`);
+            logger.info(`[SUCCESS] [Email Crawler] Extracted SOP "${sopData.title}" from Email ${msgRef.id}`);
           }
         }
       } catch (extractErr) {
-        console.warn(`[WARN] [Email Crawler] Extraction skipped for email ${msgRef.id}:`, (extractErr as Error).message);
+        if (extractErr instanceof EmbeddingError) throw extractErr;
+        logger.warn(`[WARN] [Email Crawler] Extraction skipped for email ${msgRef.id}:`, (extractErr as Error).message);
       }
 
       await markEmailThreadCrawled(emailId, inbox);
@@ -231,7 +245,7 @@ export async function crawlEmailInbox(
 
     return { source: 'email', inbox, threads_crawled: threadsCrawled, sops_extracted: sopsExtracted, status: 'success' };
   } catch (err) {
-    console.error('[ERROR] [Email Crawler] Error during crawl execution:', err);
+    logger.error('[ERROR] [Email Crawler] Error during crawl execution:', err);
     return { source: 'email', inbox, threads_crawled: threadsCrawled, sops_extracted: sopsExtracted, status: 'error' };
   }
 }

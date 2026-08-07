@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
@@ -12,7 +13,7 @@ if (GEMINI_API_KEY) {
   try {
     aiClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   } catch (err) {
-    console.warn('[ModelRouter Warning] Failed to initialize GoogleGenAI client:', err);
+    logger.warn('[ModelRouter Warning] Failed to initialize GoogleGenAI client:', err);
   }
 }
 
@@ -85,10 +86,10 @@ export async function routeCompletion(
 
         if (isRateLimit) {
           const delayMs = 1000 * Math.pow(2, attempt);
-          console.warn(`[ModelRouter Warning] Gemini 429 Rate Limit (Attempt ${attempt + 1}). Backing off for ${delayMs}ms...`);
+          logger.warn(`[ModelRouter Warning] Gemini 429 Rate Limit (Attempt ${attempt + 1}). Backing off for ${delayMs}ms...`);
           await sleep(delayMs);
         } else {
-          console.warn('[ModelRouter Warning] Gemini API call failed:', err.message);
+          logger.warn('[ModelRouter Warning] Gemini API call failed:', err.message);
           break; // Non-429 error, failover immediately to OpenRouter
         }
       }
@@ -120,7 +121,7 @@ export async function routeCompletion(
 
         if (res.status === 429) {
           const delayMs = 1000 * Math.pow(2, attempt);
-          console.warn(`[ModelRouter Warning] OpenRouter 429 Rate Limit (Attempt ${attempt + 1}). Backing off for ${delayMs}ms...`);
+          logger.warn(`[ModelRouter Warning] OpenRouter 429 Rate Limit (Attempt ${attempt + 1}). Backing off for ${delayMs}ms...`);
           await sleep(delayMs);
           continue;
         }
@@ -141,7 +142,7 @@ export async function routeCompletion(
           }
         }
       } catch (openRouterErr: any) {
-        console.warn('[ModelRouter Warning] OpenRouter API call failed:', openRouterErr.message);
+        logger.warn('[ModelRouter Warning] OpenRouter API call failed:', openRouterErr.message);
         break;
       }
     }
@@ -179,7 +180,7 @@ export async function routeCompletion(
         };
       }
     }
-  } catch (ollamaErr) {
+  } catch {
     // Local Ollama offline
   }
 

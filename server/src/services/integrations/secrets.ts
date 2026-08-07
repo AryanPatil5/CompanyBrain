@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { supabase } from '../../config/supabase.js';
@@ -18,6 +19,9 @@ if (!ENCRYPTION_SECRET && process.env.NODE_ENV === 'production') {
 const ALGORITHM = 'aes-256-gcm';
 
 function getEncryptionKey(): Buffer {
+  // Fallback is dev/test-only: production throws at module load when
+  // VAULT_SECRET_KEY is missing (line above), so this default is never
+  // reachable in production. Phase 5 replaces it with vault-backed keys.
   const secret = ENCRYPTION_SECRET || 'dev-only-insecure-default-vault-key-32b';
   return crypto.createHash('sha256').update(secret).digest();
 }
@@ -178,7 +182,7 @@ export async function storeIntegrationCredential(params: {
     .single();
 
   if (error) {
-    console.error(`[Secrets Error] Failed to store ${provider} credential for workspace ${workspace_id}:`, error);
+    logger.error(`[Secrets Error] Failed to store ${provider} credential for workspace ${workspace_id}:`, error);
     throw error;
   }
 

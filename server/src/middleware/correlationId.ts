@@ -1,31 +1,43 @@
 // Correlation ID middleware for Phase 0 (ADR-T8 scaffold)
-// Adds correlation ID to request context for distributed tracing
+// Preserves an incoming x-correlation-id (or x-request-id), generates one
+// when absent, echoes it on the response, and propagates it to the logger
+// via AsyncLocalStorage so every structured log in the request path carries
+// the same correlationId.
 
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
+import { randomUUID } from 'node:crypto';
+import { runWithCorrelationId } from '../logger.js';
 
 export const generateCorrelationId = (): string => {
-  return require('crypto').randomUUID();
+  return randomUUID();
+};
+
+export const extractCorrelationId = (
+  headers: Record<string, string | string[] | undefined>
+): string => {
+  const incoming =
+    (Array.isArray(headers['x-correlation-id'])
+      ? headers['x-correlation-id'][0]
+      : headers['x-correlation-id']) ||
+    (Array.isArray(headers['x-request-id'])
+      ? headers['x-request-id'][0]
+      : headers['x-request-id']);
+  return incoming || generateCorrelationId();
 };
 
 export const correlationIdMiddleware = (): ((req: Request, res: Response, next: NextFunction) => void) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    // Extract correlation ID from request headers
-    let correlationId = req.headers['x-correlation-id'] as string || generateCorrelationId();
+    const correlationId = extractCorrelationId(req.headers as Record<string, string | string[] | undefined>);
+    const workspaceId =
+      (Array.isArray(req.headers['x-workspace-id'])
+        ? req.headers['x-workspace-id'][0]
+        : req.headers['x-workspace-id']) || undefined;
 
-    // Attach to request and response objects
     (req as any).correlationId = correlationId;
     (res as any).correlationId = correlationId;
 
-    // Add correlation ID to response headers
     res.setHeader('x-correlation-id', correlationId);
 
-    // Attach correlation ID to response object for logging
-    res.on('finish', () => {
-      if ((res as any).logger) {
-        (res as any).logger.setCorrelationId(correlationId);
-      }
-    });
-
-    next();
+    runWithCorrelationId(correlationId, () => next(), workspaceId ? { workspaceId } : undefined);
   };
 };

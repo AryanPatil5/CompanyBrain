@@ -1,6 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Database, ShieldCheck, AlertTriangle, Activity, Sparkles, ShieldAlert, Check, X } from "lucide-react";
+import {
+  RefreshCw,
+  Database,
+  ShieldCheck,
+  AlertTriangle,
+  Activity,
+  Sparkles,
+  ShieldAlert,
+  Check,
+  X,
+} from "lucide-react";
 import { GlassSidebar, type NavTab } from "@/components/GlassSidebar";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { SopCard } from "@/components/SopCard";
@@ -46,7 +56,9 @@ function Index() {
   const [category, setCategory] = useState("All");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>(
+    [],
+  );
   const [isTeachModalOpen, setIsTeachModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<NavTab>("skills");
 
@@ -69,13 +81,16 @@ function Index() {
   }, [load]);
 
   const filtered = useMemo(
-    () => (category === "All" ? sops : sops.filter((s) => s.category === category)),
+    () =>
+      category === "All" ? sops : sops.filter((s) => s.category === category),
     [sops, category],
   );
 
   const approve = async (id: string) => {
     setSops((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: "approved" as const } : s)),
+      prev.map((s) =>
+        s.id === id ? { ...s, status: "approved" as const } : s,
+      ),
     );
 
     if (live) {
@@ -88,7 +103,11 @@ function Index() {
 
   const confirm = async (id: string) => {
     setSops((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, isStale: false, lastConfirmedAt: new Date().toISOString() } : s)),
+      prev.map((s) =>
+        s.id === id
+          ? { ...s, isStale: false, lastConfirmedAt: new Date().toISOString() }
+          : s,
+      ),
     );
 
     if (live) {
@@ -99,7 +118,10 @@ function Index() {
     }
   };
 
-  const handleResolveApproval = async (approvalId: string, status: "approved" | "rejected") => {
+  const handleResolveApproval = async (
+    approvalId: string,
+    status: "approved" | "rejected",
+  ) => {
     setPendingApprovals((prev) => prev.filter((a) => a.id !== approvalId));
     if (live) {
       await resolveApprovalApi(approvalId, status);
@@ -127,7 +149,8 @@ function Index() {
                 Procedural Skills Library
               </h1>
               <p className="text-[13.5px] text-[#6e6e73]">
-                Inspect, govern, and approve operational SOPs for autonomous AI agents.
+                Inspect, govern, and approve operational SOPs for autonomous AI
+                agents.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -165,32 +188,53 @@ function Index() {
             <section className="glass-card rounded-2xl border-amber-200 bg-amber-50/50 p-5 space-y-3 overflow-hidden">
               <div className="flex items-center justify-between">
                 <h3 className="text-[15px] font-semibold text-amber-800 flex items-center gap-2">
-                  <ShieldAlert className="h-4 w-4" /> Agent Real-Time Execution Approval Queue ({pendingApprovals.length})
+                  <ShieldAlert className="h-4 w-4" /> Agent Real-Time Execution
+                  Approval Queue ({pendingApprovals.length})
                 </h3>
-                <span className="text-[11px] font-semibold text-slate-500">Human Guardrail Triggered</span>
+                <span className="text-[11px] font-semibold text-slate-500">
+                  Human Guardrail Triggered
+                </span>
               </div>
               <div className="space-y-2">
                 {pendingApprovals.map((req) => (
-                  <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/80 p-3.5 shadow-sm overflow-hidden">
+                  <div
+                    key={req.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/80 p-3.5 shadow-sm overflow-hidden"
+                  >
                     <div className="space-y-0.5">
                       <p className="text-[13.5px] font-medium text-[#1d1d1f]">
-                        Agent <code className="text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded-2xl font-mono font-semibold">{req.agent_id}</code> requested to execute: <span className="font-semibold text-[#1d1d1f]">{req.skills_sops?.title || "High-Risk SOP"}</span>
+                        Agent{" "}
+                        <code className="text-sky-800 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded-2xl font-mono font-semibold">
+                          {req.agent_id}
+                        </code>{" "}
+                        requested to execute:{" "}
+                        <span className="font-semibold text-[#1d1d1f]">
+                          {req.skills_sops?.title || "High-Risk SOP"}
+                        </span>
                       </p>
                       <p className="text-[11.5px] text-slate-700">
-                        Risk Level: <span className="text-amber-700 font-semibold">{req.risk_level}</span> · Reason: {req.reason}
+                        Risk Level:{" "}
+                        <span className="text-amber-700 font-semibold">
+                          {req.risk_level}
+                        </span>{" "}
+                        · Reason: {req.reason}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => void handleResolveApproval(req.id, "approved")}
+                        onClick={() =>
+                          void handleResolveApproval(req.id, "approved")
+                        }
                         className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-green-200 bg-green-50 px-4 text-[12px] font-semibold text-green-800 hover:bg-green-100 active:scale-95 cursor-pointer"
                       >
                         <Check className="h-3.5 w-3.5" /> Approve Execution
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleResolveApproval(req.id, "rejected")}
+                        onClick={() =>
+                          void handleResolveApproval(req.id, "rejected")
+                        }
                         className="glass-button flex h-10 items-center gap-1.5 overflow-hidden rounded-lg border-red-200 bg-red-50 px-4 text-[12px] font-semibold text-red-700 hover:bg-red-100 active:scale-95 cursor-pointer"
                       >
                         <X className="h-3.5 w-3.5" /> Reject
@@ -210,8 +254,12 @@ function Index() {
                   <Database className="h-4.5 w-4.5" />
                 </div>
                 <div>
-                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.total_sops}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Total SOPs</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">
+                    {analytics.total_sops}
+                  </p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                    Total SOPs
+                  </p>
                 </div>
               </div>
               <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3.5 overflow-hidden">
@@ -219,8 +267,12 @@ function Index() {
                   <ShieldCheck className="h-4.5 w-4.5" />
                 </div>
                 <div>
-                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.by_status?.Approved || 0}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Approved</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">
+                    {analytics.by_status?.["Approved"] || 0}
+                  </p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                    Approved
+                  </p>
                 </div>
               </div>
               <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3.5 overflow-hidden">
@@ -228,8 +280,12 @@ function Index() {
                   <ShieldAlert className="h-4.5 w-4.5" />
                 </div>
                 <div>
-                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.pending_approvals_count || 0}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Gated Queue</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">
+                    {analytics.pending_approvals_count || 0}
+                  </p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                    Gated Queue
+                  </p>
                 </div>
               </div>
               <div className="glass-card flex items-center gap-3 rounded-2xl px-4 py-3.5 overflow-hidden">
@@ -237,21 +293,21 @@ function Index() {
                   <Activity className="h-4.5 w-4.5" />
                 </div>
                 <div>
-                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">{analytics.recent_executions}</p>
-                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">Executions (7d)</p>
+                  <p className="text-[22px] font-semibold leading-none text-[#1d1d1f]">
+                    {analytics.recent_executions}
+                  </p>
+                  <p className="mt-1 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
+                    Executions (7d)
+                  </p>
                 </div>
               </div>
             </div>
           )}
 
           {/* Active Tab View Switching */}
-          {activeTab === "graph" && (
-            <GraphVisualizerPanel />
-          )}
+          {activeTab === "graph" && <GraphVisualizerPanel />}
 
-          {activeTab === "agents" && (
-            <AgentExecutionConsole />
-          )}
+          {activeTab === "agents" && <AgentExecutionConsole />}
 
           {activeTab === "skills" && (
             <>

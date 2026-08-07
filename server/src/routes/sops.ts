@@ -1,11 +1,10 @@
+import { logger } from '../logger.js';
 import { Router, Request, Response } from 'express';
-import { supabase } from '../config/supabase.js';
-import { createVersion, confirmSOP, markStaleSOPs } from '../services/freshness.js';
+import { createVersion, confirmSOP } from '../services/freshness.js';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { getTenantClient } from '../middleware/tenantClient.js';
 import { hybridSearch } from '../services/retrieval/hybridSearch.js';
 import { runWorkflow } from '../agents/orchestrator.js';
-import { getConnectedEntities } from '../services/graph/graphService.js';
 import { compileSopToAst, validateSopAst } from '../services/skills/sopCompiler.js';
 import { discoverAndSynthesizeToolsFromSpec } from '../services/skills/openApiAutoDiscoverer.js';
 
@@ -39,7 +38,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     }
 
     res.json({ sops: data });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch SOPs' });
   }
 });
@@ -67,12 +66,12 @@ router.get('/search', async (req: Request, res: Response): Promise<void> => {
 
     res.json({ success: true, count: results.length, results });
   } catch (err) {
-    console.error('[Hybrid Search Route Error]:', err);
+    logger.error('[Hybrid Search Route Error]:', err);
     res.status(500).json({ error: 'Hybrid search execution failed' });
   }
 });
 
-// ─── GET Apache AGE Graph Entities & Edges ───────────────────
+// ─── GET Relational Knowledge Graph Entities & Edges ────────
 
 router.get('/graph', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -81,14 +80,14 @@ router.get('/graph', async (req: Request, res: Response): Promise<void> => {
     const client = getTenantClient(req);
 
     const { data: nodes } = await client.from('graph_nodes').select('*').eq('workspace_id', workspaceId).limit(50);
-    const { data: edges } = await client.from('graph_edges').select('*').limit(100);
+    const { data: edges } = await client.from('graph_edges').select('*').eq('workspace_id', workspaceId).limit(100);
 
     res.json({
       success: true,
       nodes: nodes || [],
       edges: edges || [],
     });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch graph data' });
   }
 });
@@ -115,7 +114,7 @@ router.post('/workflow', async (req: Request, res: Response): Promise<void> => {
 
     res.json(workflowResult);
   } catch (err) {
-    console.error('[Workflow Execution Route Error]:', err);
+    logger.error('[Workflow Execution Route Error]:', err);
     res.status(500).json({ error: 'Workflow execution failed' });
   }
 });
@@ -142,7 +141,7 @@ router.get('/approvals', async (req: Request, res: Response): Promise<void> => {
     }
 
     res.json({ approvals: data || [] });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch pending approvals' });
   }
 });
@@ -198,7 +197,7 @@ router.patch('/approvals/:approvalId', requireRole(['admin', 'approver']), async
     }
 
     res.json({ message: `Agent execution ${status}`, approval: data });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to resolve approval' });
   }
 });
@@ -274,7 +273,7 @@ router.get('/analytics', async (req: Request, res: Response): Promise<void> => {
       sources_ingested: bySources,
     });
   } catch (err) {
-    console.error('[Analytics Error]:', err);
+    logger.error('[Analytics Error]:', err);
     res.status(500).json({ error: 'Failed to compute analytics' });
   }
 });
@@ -344,7 +343,7 @@ router.patch('/:id', async (req: Request, res: Response): Promise<void> => {
     }
 
     res.json({ message: 'SOP updated successfully', sop: data });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to update SOP' });
   }
 });
@@ -381,7 +380,7 @@ router.post('/:id/confirm', async (req: Request, res: Response): Promise<void> =
       return;
     }
     res.json({ message: 'SOP confirmed as current.' });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to confirm SOP' });
   }
 });
@@ -424,7 +423,7 @@ router.get('/:id/versions', async (req: Request, res: Response): Promise<void> =
     }
 
     res.json({ versions: data });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch version history' });
   }
 });
@@ -466,7 +465,7 @@ router.delete('/:id', requireRole(['admin', 'approver']), async (req: Request, r
     }
 
     res.json({ message: 'SOP deleted successfully' });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to delete SOP' });
   }
 });

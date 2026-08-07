@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { supabase } from '../src/config/supabase.js';
 import { persistSourceDocumentWithChunks, formatMessagesAsTranscript } from '../src/ingestion/sourceObjects.js';
-import { generateEmbedding } from '../src/services/embeddings.js';
 import { hybridSearch } from '../src/services/retrieval/hybridSearch.js';
-import { chunkText, hashContent } from '../src/ingestion/chunker.js';
+import { chunkText } from '../src/ingestion/chunker.js';
 
 /**
  * Integration Test: End-to-End Chunk Ingestion → Embedding → Retrieval Pipeline
@@ -20,7 +19,7 @@ describe('Chunk Ingestion Pipeline', () => {
   const TEST_SOURCE = 'test_connector';
   const TEST_EXTERNAL_ID = `test_${Date.now()}`;
   let createdSourceDocumentId: string | null = null;
-  let createdChunkIds: string[] = [];
+  const createdChunkIds: string[] = [];
 
   beforeAll(async () => {
     console.log('🧪 Starting chunk ingestion integration tests...');

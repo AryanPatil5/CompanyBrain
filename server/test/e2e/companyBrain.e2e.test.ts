@@ -32,15 +32,15 @@ Secret_Rotation\tN/A\tYes (Critical)
   }
   console.log('  ✅ Stage 1 Passed: Layout-aware parser extracted document sections and Markdown tables.');
 
-  // ─── STAGE 2: Graph Entity Extraction & Apache AGE Persistence ───
-  console.log('\n[Stage 2/5] Apache AGE Graph Extraction & Persistence...');
+  // ─── STAGE 2: Graph Entity Extraction & Relational Persistence ───
+  console.log('\n[Stage 2/5] Relational Graph Extraction & Persistence...');
   const sopNode = await addEntityNode('SOP', { id: 'sop_e2e_billing_gate', name: 'Operational Gate & Billing Policy', workspace_id: workspaceId });
   const sysNode = await addEntityNode('System', { id: 'sys_stripe_e2e', name: 'Stripe Payment Gateway', workspace_id: workspaceId });
   const rel = await createRelationship('sop_e2e_billing_gate', 'sys_stripe_e2e', 'REQUIRES');
 
-  const connected = await getConnectedEntities('sop_e2e_billing_gate', 1);
+  const connected = await getConnectedEntities('sop_e2e_billing_gate', 1, { workspaceId });
   if (!sopNode.id || !sysNode.id || !rel.source_id || !Array.isArray(connected)) {
-    console.error('❌ STAGE 2 FAILED: Apache AGE graph persistence or traversal failed!');
+    console.error('❌ STAGE 2 FAILED: Relational graph persistence or traversal failed!');
     return false;
   }
   console.log(`  ✅ Stage 2 Passed: Created graph vertices and edge relationships (${connected.length} connected neighbor).`);

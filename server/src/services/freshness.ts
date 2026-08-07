@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 /**
  * Knowledge Freshness Service
  *
@@ -31,7 +32,7 @@ export async function createVersion(
       .single();
 
     if (fetchErr || !current) {
-      console.error('[Freshness] Cannot version — SOP not found:', sopId);
+      logger.error('[Freshness] Cannot version — SOP not found:', sopId);
       return false;
     }
 
@@ -57,7 +58,7 @@ export async function createVersion(
       });
 
     if (insertErr) {
-      console.error('[Freshness] Failed to create version snapshot:', insertErr);
+      logger.error('[Freshness] Failed to create version snapshot:', insertErr);
       return false;
     }
 
@@ -67,10 +68,10 @@ export async function createVersion(
       .update({ version: nextVersion + 1, updated_at: new Date().toISOString() })
       .eq('id', sopId);
 
-    console.log(`[Freshness] Created version ${nextVersion} for SOP: ${sopId}`);
+    logger.info(`[Freshness] Created version ${nextVersion} for SOP: ${sopId}`);
     return true;
   } catch (err) {
-    console.error('[Freshness] Version creation error:', err);
+    logger.error('[Freshness] Version creation error:', err);
     return false;
   }
 }
@@ -99,17 +100,17 @@ export async function markStaleSOPs(thresholdDays: number = 30, workspaceId?: st
     const { data, error } = await query.select('id');
 
     if (error) {
-      console.error('[Freshness] Staleness sweep error:', error);
+      logger.error('[Freshness] Staleness sweep error:', error);
       return 0;
     }
 
     const count = data?.length || 0;
     if (count > 0) {
-      console.log(`[Freshness] Marked ${count} SOPs as stale (threshold: ${thresholdDays} days)`);
+      logger.info(`[Freshness] Marked ${count} SOPs as stale (threshold: ${thresholdDays} days)`);
     }
     return count;
   } catch (err) {
-    console.error('[Freshness] Staleness sweep exception:', err);
+    logger.error('[Freshness] Staleness sweep exception:', err);
     return 0;
   }
 }
@@ -128,11 +129,11 @@ export async function confirmSOP(sopId: string): Promise<boolean> {
     .eq('id', sopId);
 
   if (error) {
-    console.error('[Freshness] Failed to confirm SOP:', error);
+    logger.error('[Freshness] Failed to confirm SOP:', error);
     return false;
   }
 
-  console.log(`[Freshness] SOP confirmed as current: ${sopId}`);
+  logger.info(`[Freshness] SOP confirmed as current: ${sopId}`);
   return true;
 }
 
@@ -190,7 +191,7 @@ export async function detectConflict(
 
       if (!rpcErr && rpcMatches && rpcMatches.length > 0) {
         candidateSOPs = rpcMatches;
-        console.log(`[Freshness] Semantic vector search found ${candidateSOPs.length} candidate matches for "${newTitle}"`);
+        logger.info(`[Freshness] Semantic vector search found ${candidateSOPs.length} candidate matches for "${newTitle}"`);
       }
     }
 
@@ -253,7 +254,7 @@ Respond ONLY with this raw JSON object:
     });
 
     if (!response.ok) {
-      console.warn('[Freshness] Conflict detection LLM call failed, skipping');
+      logger.warn('[Freshness] Conflict detection LLM call failed, skipping');
       return noConflict;
     }
 
@@ -279,7 +280,7 @@ Respond ONLY with this raw JSON object:
       conflict_summary: parsed.conflict_summary || 'No conflicts found.',
     };
   } catch (err) {
-    console.warn('[Freshness] Conflict detection exception (non-fatal):', err);
+    logger.warn('[Freshness] Conflict detection exception (non-fatal):', err);
     return noConflict;
   }
 }

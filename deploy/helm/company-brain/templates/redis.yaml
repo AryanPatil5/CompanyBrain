@@ -1,0 +1,85 @@
+{{- if .Values.infra.redis.enabled }}
+{{- $name := include "company-brain.component" (merge (dict "suffix" "redis") .) }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: infra
+spec:
+  serviceName: {{ $name }}
+  replicas: {{ .Values.infra.redis.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/component: infra
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.infra.redis.image.repository }}:{{ .Values.infra.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.infra.redis.image.pullPolicy }}
+          ports:
+            - name: redis
+              containerPort: {{ .Values.infra.redis.service.port }}
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: {{ .Values.infra.redis.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.redis.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.redis.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.redis.probes.failureThreshold }}
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: {{ .Values.infra.redis.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.redis.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.redis.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.redis.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.infra.redis.resources | nindent 12 }}
+          {{- if .Values.infra.redis.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+  {{- if .Values.infra.redis.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.infra.redis.persistence.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.infra.redis.persistence.size }}
+  {{- else }}
+  volumes:
+    - name: data
+      emptyDir: {}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: infra
+spec:
+  type: {{ .Values.infra.redis.service.type }}
+  ports:
+    - port: {{ .Values.infra.redis.service.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+{{- end }}

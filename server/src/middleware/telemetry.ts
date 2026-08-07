@@ -80,7 +80,7 @@ export function getPrometheusMetricsString(): string {
     }
   }
 
-  let lines: string[] = [
+  const lines: string[] = [
     '# HELP ingestion_queue_latency_ms Latency of BullMQ ingestion jobs in milliseconds',
     '# TYPE ingestion_queue_latency_ms summary',
     `ingestion_queue_latency_ms_sum ${metricGroups['ingestion_queue_latency_ms_sum']}`,

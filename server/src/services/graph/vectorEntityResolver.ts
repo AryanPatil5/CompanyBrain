@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { generateEmbeddings, generateText } from '../aiProvider.js';
 import { supabase } from '../../config/supabase.js';
 
@@ -149,7 +150,7 @@ Answer strictly with JSON format: {"match": boolean, "canonicalName": "string"}`
       };
     }
   } catch (llmErr) {
-    console.warn('[VectorEntityResolver Warning] LLM verification error, defaulting to similarity threshold match:', llmErr);
+    logger.warn('[VectorEntityResolver Warning] LLM verification error, defaulting to similarity threshold match:', llmErr);
     // If similarity >= 0.92, treat as duplicate fallback
     if (candidates[0].similarity >= 0.92) {
       return {

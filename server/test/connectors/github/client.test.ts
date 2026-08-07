@@ -41,7 +41,7 @@ async function runClientTest(): Promise<boolean> {
   // ─── 1. Link-header pagination across 3 pages ───
   {
     const requestedUrls: string[] = [];
-    const fetchImpl: typeof fetch = async (url, init) => {
+    const fetchImpl: typeof fetch = async (url, _init) => {
       requestedUrls.push(String(url));
       const page = Number.parseInt(new URL(String(url)).searchParams.get('page') || '1', 10);
       if (page === 1) {

@@ -1,6 +1,6 @@
 import { Brain, Boxes, Network, Plug, Sparkles } from "lucide-react";
 
-export type NavTab = "skills" | "mcp" | "integrations";
+export type NavTab = "skills" | "mcp" | "integrations" | "graph" | "agents";
 
 const NAV: Array<{ id: NavTab; label: string; icon: any }> = [
   { id: "skills", label: "Skills Library", icon: Boxes },
@@ -24,8 +24,12 @@ export function GlassSidebar({
           <Brain className="h-5 w-5 text-white" />
         </span>
         <div className="leading-tight">
-          <p className="text-[15px] font-semibold tracking-tight text-[#1d1d1f]">Company Brain</p>
-          <p className="text-[11px] font-medium text-[#6e6e73]">Knowledge Engine</p>
+          <p className="text-[15px] font-semibold tracking-tight text-[#1d1d1f]">
+            Company Brain
+          </p>
+          <p className="text-[11px] font-medium text-[#6e6e73]">
+            Knowledge Engine
+          </p>
         </div>
       </div>
 

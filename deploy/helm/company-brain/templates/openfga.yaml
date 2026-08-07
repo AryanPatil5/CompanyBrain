@@ -1,0 +1,86 @@
+{{- if .Values.infra.openfga.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "company-brain.component" (merge (dict "suffix" "openfga") .) }}
+  labels:
+    app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "openfga") .) }}
+    app.kubernetes.io/component: infra
+spec:
+  replicas: {{ .Values.infra.openfga.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "openfga") .) }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "openfga") .) }}
+        app.kubernetes.io/component: infra
+    spec:
+      containers:
+        - name: openfga
+          image: "{{ .Values.infra.openfga.image.repository }}:{{ .Values.infra.openfga.image.tag }}"
+          imagePullPolicy: {{ .Values.infra.openfga.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.infra.openfga.httpPort }}
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ .Values.infra.openfga.grpcPort }}
+              protocol: TCP
+            - name: playground
+              containerPort: {{ .Values.infra.openfga.playgroundPort }}
+              protocol: TCP
+          env:
+            - name: OPENFGA_DATASTORE_ENGINE
+              value: {{ .Values.infra.openfga.datastoreEngine | quote }}
+            - name: OPENFGA_HTTP_PORT
+              value: {{ .Values.infra.openfga.httpPort | quote }}
+            - name: OPENFGA_GRPC_PORT
+              value: {{ .Values.infra.openfga.grpcPort | quote }}
+            - name: OPENFGA_PLAYGROUND_PORT
+              value: {{ .Values.infra.openfga.playgroundPort | quote }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.infra.openfga.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.openfga.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.openfga.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.openfga.probes.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.infra.openfga.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.openfga.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.openfga.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.openfga.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.infra.openfga.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "company-brain.component" (merge (dict "suffix" "openfga") .) }}
+  labels:
+    app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "openfga") .) }}
+    app.kubernetes.io/component: infra
+spec:
+  type: {{ .Values.infra.openfga.service.type }}
+  ports:
+    - port: {{ .Values.infra.openfga.httpPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.infra.openfga.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+    - port: {{ .Values.infra.openfga.playgroundPort }}
+      targetPort: playground
+      protocol: TCP
+      name: playground
+  selector:
+    app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "openfga") .) }}
+{{- end }}

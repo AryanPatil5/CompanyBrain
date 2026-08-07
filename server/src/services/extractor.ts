@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import dotenv from 'dotenv';
 import { z } from 'zod';
 import { supabase } from '../config/supabase.js';
@@ -146,7 +147,7 @@ Return JSON output matching this schema:
   "requires_human_gate": boolean
 }`;
 
-    const rawText = await generateText(userPrompt, SYSTEM_PROMPT);
+    const rawText = await generateText(userPrompt, SYSTEM_PROMPT, { workspaceId, purpose: 'sop_extraction' });
 
     if (!rawText) {
       throw new Error('Empty response from AI Provider.');
@@ -173,7 +174,7 @@ Return JSON output matching this schema:
       return null;
     }
 
-    // Persist extracted graph entities and relationships into Apache AGE graph space
+    // Persist extracted graph entities and relationships into relational graph tables
     try {
       if (Array.isArray(validated.entities)) {
         for (const ent of validated.entities) {
@@ -191,13 +192,13 @@ Return JSON output matching this schema:
         }
       }
     } catch (graphErr) {
-      console.warn('[Extractor Warning] Graph persistence failed:', graphErr);
+      logger.warn('[Extractor Warning] Graph persistence failed:', graphErr);
     }
 
     return validated;
   } catch (error) {
     const errorMsg = (error as Error).message || 'SOP extraction failed schema validation';
-    console.error('[Extractor Error]: Failed to extract SOP from thread:', errorMsg);
+    logger.error('[Extractor Error]: Failed to extract SOP from thread:', errorMsg);
 
     // Audit log failure to ingestion_failures table
     try {
@@ -208,7 +209,7 @@ Return JSON output matching this schema:
         error_message: errorMsg,
       });
     } catch (dbErr) {
-      console.error('[Extractor Error]: Failed to write ingestion_failure log:', dbErr);
+      logger.error('[Extractor Error]: Failed to write ingestion_failure log:', dbErr);
     }
 
     // Throw error so processThread can return HTTP 422 Unprocessable Entity

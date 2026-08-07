@@ -32,7 +32,13 @@ export default tseslint.config(
           ],
         },
       ],
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-refresh/only-export-components": [
+        "warn",
+        { allowConstantExport: true },
+      ],
+      // API-boundary payloads predate strict typing; Phase 1 owns the
+      // strict-typing pass (MASTER_ROADMAP.md). Same exemption as the server.
+      "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unused-vars": "off",
     },
   },

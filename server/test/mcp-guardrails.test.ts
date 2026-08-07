@@ -1,12 +1,12 @@
 import { authenticateMcpToken, checkExecutionGate } from '../src/services/mcp.js';
 import { dispatchStepExecution } from '../src/services/integrations/http_adapters.js';
-import { resolveWorkspaceForWebhook, resolveSlackWorkspaceMiddleware, resolveGitHubWorkspaceMiddleware, resolveLinearWorkspaceMiddleware } from '../src/routes/connectors.js';
+import { resolveWorkspaceForWebhook, resolveSlackWorkspaceMiddleware } from '../src/routes/connectors.js';
 import { getTenantClient } from '../src/middleware/tenantClient.js';
-import { authenticate, type AuthenticatedRequest } from '../src/middleware/auth.js';
+import { authenticate } from '../src/middleware/auth.js';
 import { ingestionLimiter, webhookLimiter } from '../src/middleware/rateLimiter.js';
 import { extractSOPFromThread } from '../src/services/extractor.js';
 import { storeIntegrationCredential, getIntegrationCredential, encryptSecret, decryptSecret } from '../src/services/integrations/secrets.js';
-import { createOAuthStateNonce, verifyAndConsumeOAuthStateNonce, getPlatformOAuthConfig } from '../src/routes/integrations.js';
+import { getPlatformOAuthConfig } from '../src/routes/integrations.js';
 import { supabase } from '../src/config/supabase.js';
 
 async function runMcpGuardrailsTestSuite() {
@@ -158,7 +158,7 @@ async function runMcpGuardrailsTestSuite() {
 
   // ─── Test 8: Webhook Server-Side Tenant Resolution (Gap C) ───
   try {
-    const slackWorkspace = await resolveWorkspaceForWebhook('slack', 'T12345678');
+    await resolveWorkspaceForWebhook('slack', 'T12345678');
     const nonExistentWorkspace = await resolveWorkspaceForWebhook('slack', 'T_FAKE_UNKNOWN_ORG');
 
     if (nonExistentWorkspace === null) {
@@ -323,7 +323,6 @@ async function runMcpGuardrailsTestSuite() {
     delete process.env.GOOGLE_CLIENT_ID;
 
     // Unconfigured provider pre-check should reject with HTTP 503
-    const configCheckSlack = !!(process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET);
     const configCheckGmail = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 
     if (origGoogleClient) process.env.GOOGLE_CLIENT_ID = origGoogleClient;
@@ -372,16 +371,48 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 20: Hybrid AI Model Provider Layer (Gemini & Ollama Fallbacks) ───
+  // ─── Test 20: Embedding generation never fabricates pseudo-vectors ───
   try {
-    const { generateEmbeddings } = await import('../src/services/aiProvider.js');
-    const vector = await generateEmbeddings("test embedding string");
+    const { generateEmbeddings, EmbeddingError } = await import('../src/services/aiProvider.js');
 
-    if (Array.isArray(vector) && vector.length === 1536) {
-      console.log("✅ TEST 20 PASSED: Hybrid AI Model Provider vector embedding (1536 float values) generated with local fallback handling.");
+    // Contract: empty input must throw a typed error, never return zero vectors.
+    let emptyThrew: unknown = null;
+    try {
+      await generateEmbeddings('');
+    } catch (err) {
+      emptyThrew = err;
+    }
+    if (emptyThrew instanceof EmbeddingError) {
+      console.log("✅ TEST 20a PASSED: Empty input throws typed EmbeddingError (no zero-vector fabrication).");
       passed++;
     } else {
-      console.error("❌ TEST 20 FAILED: Vector embedding generation failed or dimension mismatch!", vector?.length);
+      console.error("❌ TEST 20a FAILED: Empty input did not throw EmbeddingError!", emptyThrew);
+      failed++;
+    }
+
+    // Contract: with no reachable embedding provider, generation must fail
+    // loudly with a typed error — never silently return a deterministic
+    // pseudo-vector. If a real provider is available it must return a genuine
+    // 1536-dim vector.
+    let vector: number[] | undefined;
+    let threw: unknown = null;
+    try {
+      vector = await generateEmbeddings("test embedding string");
+    } catch (err) {
+      threw = err;
+    }
+
+    if (threw !== null && threw instanceof EmbeddingError) {
+      console.log("✅ TEST 20b PASSED: Embedding failure throws typed EmbeddingError (no pseudo-vector fallback).");
+      passed++;
+    } else if (threw !== null) {
+      console.error("❌ TEST 20b FAILED: Embedding failure threw a non-typed error!", threw);
+      failed++;
+    } else if (Array.isArray(vector) && vector.length === 1536) {
+      console.log("✅ TEST 20b PASSED: Real embedding provider returned genuine 1536-dim vector.");
+      passed++;
+    } else {
+      console.error("❌ TEST 20b FAILED: Vector embedding generation failed or dimension mismatch!", vector?.length);
       failed++;
     }
   } catch (err) {
@@ -405,15 +436,15 @@ async function runMcpGuardrailsTestSuite() {
     failed++;
   }
 
-  // ─── Test 22: Apache AGE Enterprise Knowledge Graph Integration ───
+  // ─── Test 22: Relational Knowledge Graph Integration ───
   try {
     const { runApacheAgeGraphTest } = await import('./graph/apacheAgeGraph.test.js');
     const graphSuccess = await runApacheAgeGraphTest();
     if (graphSuccess) {
-      console.log("✅ TEST 22 PASSED: Apache AGE Knowledge Graph nodes, edges, and multi-hop traversal executed successfully.");
+      console.log("✅ TEST 22 PASSED: Knowledge Graph nodes, edges, and multi-hop traversal executed successfully.");
       passed++;
     } else {
-      console.error("❌ TEST 22 FAILED: Apache AGE Knowledge Graph test failed!");
+      console.error("❌ TEST 22 FAILED: Relational Knowledge Graph test failed!");
       failed++;
     }
   } catch (err) {
@@ -474,7 +505,7 @@ async function runMcpGuardrailsTestSuite() {
     const { runCompanyBrainE2ETest } = await import('./e2e/companyBrain.e2e.test.js');
     const e2eSuccess = await runCompanyBrainE2ETest();
     if (e2eSuccess) {
-      console.log("✅ TEST 26 PASSED: All 5 sequential E2E pipeline stages (Ingestion, Apache AGE, Hybrid Search, Multi-Agent, Sandbox Execution) verified successfully.");
+      console.log("✅ TEST 26 PASSED: All 5 sequential E2E pipeline stages (Ingestion, Graph, Hybrid Search, Multi-Agent, Sandbox Execution) verified successfully.");
       passed++;
     } else {
       console.error("❌ TEST 26 FAILED: E2E Integration pipeline test failed!");
@@ -578,6 +609,54 @@ async function runMcpGuardrailsTestSuite() {
     }
   } catch (err) {
     console.error("❌ TEST 32 EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 32b: CIDR ABAC Matcher (IPv4/IPv6, fail-closed, substring-bypass regression) ───
+  try {
+    const { runCidrAbacTest } = await import('./infra/cidrAbac.test.js');
+    const cidrSuccess = await runCidrAbacTest();
+    if (cidrSuccess) {
+      console.log("✅ TEST 32b PASSED: CIDR ABAC matcher handles IPv4/IPv6 allow-deny, malformed inputs fail closed, and substring bypasses are rejected.");
+      passed++;
+    } else {
+      console.error("❌ TEST 32b FAILED: CIDR ABAC matcher test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 32b EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 32c: SSRF Guard (schemes, private ranges, DNS rebinding, redirects) ───
+  try {
+    const { runSsrfGuardTest } = await import('./infra/ssrfGuard.test.js');
+    const ssrfSuccess = await runSsrfGuardTest();
+    if (ssrfSuccess) {
+      console.log("✅ TEST 32c PASSED: SSRF guard rejects private/loopback/metadata targets, non-http schemes, DNS rebinding, and unsafe redirect hops.");
+      passed++;
+    } else {
+      console.error("❌ TEST 32c FAILED: SSRF guard test failed!");
+      failed++;
+    }
+  } catch (err) {
+    console.error("❌ TEST 32c EXCEPTION:", err);
+    failed++;
+  }
+
+  // ─── Test 32d: KeyProvider production mock-credential refusal ───
+  try {
+    const { runKeyProviderTest } = await import('./security/keyProvider.test.js');
+    const keyProviderSuccess = await runKeyProviderTest();
+    if (keyProviderSuccess) {
+      console.log('✅ TEST 32d PASSED: Production refuses MemoryKeyProvider and unconfigured/unset KEY_PROVIDER; dev defaults preserved.');
+      passed++;
+    } else {
+      console.error('❌ TEST 32d FAILED: KeyProvider mock-credential guard test failed!');
+      failed++;
+    }
+  } catch (err) {
+    console.error('❌ TEST 32d EXCEPTION:', err);
     failed++;
   }
 
@@ -762,7 +841,7 @@ async function runMcpGuardrailsTestSuite() {
     const { runGraphFusionTest } = await import('./retrieval/graphFusion.test.js');
     const graphFusionSuccess = await runGraphFusionTest();
     if (graphFusionSuccess) {
-      console.log("✅ TEST 44 PASSED: GraphRAG Traversal Fusion extracted query entities, traversed 2-hop Apache AGE graph paths, and enriched hybrid search context.");
+      console.log("✅ TEST 44 PASSED: GraphRAG Traversal Fusion extracted query entities, traversed 2-hop relational graph paths, and enriched hybrid search context.");
       passed++;
     } else {
       console.error("❌ TEST 44 FAILED: GraphRAG Traversal Fusion test failed!");

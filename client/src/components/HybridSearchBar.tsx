@@ -1,9 +1,12 @@
-import { useState } from 'react';
-import { Search, Sparkles, ShieldCheck, Zap } from 'lucide-react';
-import { searchHybrid, type HybridSearchResultItem } from '../services/apiClient';
+import { useState } from "react";
+import { Search, Sparkles, ShieldCheck, Zap } from "lucide-react";
+import {
+  searchHybrid,
+  type HybridSearchResultItem,
+} from "../services/apiClient";
 
 export function HybridSearchBar() {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<HybridSearchResultItem[]>([]);
   const [searched, setSearched] = useState(false);
@@ -60,24 +63,32 @@ export function HybridSearchBar() {
 
           <div className="grid gap-3 sm:grid-cols-2">
             {results.map((item) => (
-              <div key={item.id} className="glass-card flex flex-col justify-between gap-3 rounded-xl p-4 border border-black/[0.06]">
+              <div
+                key={item.id}
+                className="glass-card flex flex-col justify-between gap-3 rounded-xl p-4 border border-black/[0.06]"
+              >
                 <div className="flex items-start justify-between gap-2">
-                  <h4 className="text-[14.5px] font-semibold text-[#1d1d1f]">{item.title}</h4>
+                  <h4 className="text-[14.5px] font-semibold text-[#1d1d1f]">
+                    {item.title}
+                  </h4>
                   <span className="rounded-full bg-[#0071e3]/10 px-2.5 py-0.5 text-[10.5px] font-semibold text-[#0071e3]">
                     RRF Score: {item.rrfScore.toFixed(4)}
                   </span>
                 </div>
 
-                <p className="text-[12.5px] text-[#6e6e73] line-clamp-2">{item.trigger_condition}</p>
+                <p className="text-[12.5px] text-[#6e6e73] line-clamp-2">
+                  {item.trigger_condition}
+                </p>
 
                 <div className="flex items-center justify-between pt-1 text-[11px] text-[#6e6e73]">
                   <span className="flex items-center gap-1">
                     <Zap className="h-3 w-3 text-amber-500" />
-                    Dense Rank: {item.denseRank ? `#${item.denseRank}` : 'N/A'}
+                    Dense Rank: {item.denseRank ? `#${item.denseRank}` : "N/A"}
                   </span>
                   <span className="flex items-center gap-1">
                     <ShieldCheck className="h-3 w-3 text-emerald-500" />
-                    Sparse Rank: {item.sparseRank ? `#${item.sparseRank}` : 'N/A'}
+                    Sparse Rank:{" "}
+                    {item.sparseRank ? `#${item.sparseRank}` : "N/A"}
                   </span>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { verifyWebhookSignature, processWebhookEvent } from '../services/ingestion/webhookService.js';
+import { verifyWebhookSignature } from '../services/ingestion/webhookService.js';
 import { webhookIngestionQueue } from '../queue/ingestionQueue.js';
 import { createGithubWebhookHandler } from '../connectors/github/webhook.js';
 import { logger } from '../logger.js';
@@ -98,7 +98,7 @@ router.post('/:provider', async (req: Request, res: Response): Promise<void> => 
       }
     );
   } catch (err: any) {
-    console.warn('[Webhooks Route Warning] Redis queue push fallback:', err.message);
+    logger.warn('[Webhooks Route Warning] Redis queue push fallback:', err.message);
   }
 
   const durationMs = Date.now() - startTime;

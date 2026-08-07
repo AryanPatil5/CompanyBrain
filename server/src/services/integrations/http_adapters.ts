@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { resolveCredential } from './secrets.js';
-import { ssrfGuard } from '../security/ssrfGuard.js';
+import { SsrfGuardError, ssrfSafeFetch } from '../security/ssrfGuard.js';
 
 export interface HttpDispatchResult {
   success: boolean;
@@ -11,6 +11,9 @@ export interface HttpDispatchResult {
 
 /**
  * Dispatches an HTTP fetch request with 5-second timeout and 1x automatic retry.
+ * Every request (and every redirect hop) passes the SSRF guard: private/loopback/
+ * link-local ranges, cloud metadata endpoints, non-http(s) schemes, and DNS
+ * rebinding targets are rejected before connecting.
  */
 async function fetchWithRetry(
   url: string,
@@ -26,7 +29,7 @@ async function fetchWithRetry(
     const timer = setTimeout(() => controller.abort(), 5000); // 5-second timeout
 
     try {
-      const res = await fetch(url, {
+      const res = await ssrfSafeFetch(url, {
         ...options,
         signal: controller.signal,
       });
@@ -51,6 +54,14 @@ async function fetchWithRetry(
       lastError = `HTTP ${res.status}: ${typeof data === 'object' ? JSON.stringify(data) : text}`;
     } catch (err) {
       clearTimeout(timer);
+      if (err instanceof SsrfGuardError) {
+        return {
+          success: false,
+          status_code: 403,
+          response_data: null,
+          error: `SSRF guard rejected target: ${err.message}`,
+        };
+      }
       lastError = (err as Error).name === 'AbortError' ? 'HTTP Request Timed Out (5000ms)' : (err as Error).message;
     }
   }

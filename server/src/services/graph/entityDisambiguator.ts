@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { GraphTriple } from './ontologyCompiler.js';
 import { findSimilarEntities } from './vectorEntityResolver.js';
 
@@ -82,7 +83,7 @@ export async function disambiguateEntityWithVector(
       return canonicalizeEntity(vectorMatch.canonicalName, entityType);
     }
   } catch (err) {
-    console.warn('[EntityDisambiguator Warning] Vector resolution fallback:', err);
+    logger.warn('[EntityDisambiguator Warning] Vector resolution fallback:', err);
   }
 
   return dictionaryMatch;

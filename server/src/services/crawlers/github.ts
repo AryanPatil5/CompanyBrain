@@ -1,8 +1,10 @@
+import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
 import { extractSOPFromThread } from '../extractor.js';
 import { createVersion } from '../freshness.js';
-import { generateEmbedding } from '../embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
+import { ssrfSafeFetch } from '../security/ssrfGuard.js';
 import { handleRateLimitResponse } from '../../queue/rateLimiter.js';
 
 dotenv.config();
@@ -37,7 +39,7 @@ async function markGitHubIssueCrawledBatch(entries: Array<{ source: string; exte
   try {
     await supabase.from('crawled_sources').insert(entries);
   } catch (err) {
-    console.warn('[GitHub Crawler] Failed batch deduplication insert:', err);
+    logger.warn('[GitHub Crawler] Failed batch deduplication insert:', err);
   }
 }
 
@@ -53,7 +55,7 @@ export async function* fetchGitHubIssuesStream(
   let attempt = 1;
   while (attempt <= 3) {
     try {
-      const response = await fetch(url, {
+      const response = await ssrfSafeFetch(url, {
         headers: {
           'Authorization': `Bearer ${GITHUB_TOKEN}`,
           'Accept': 'application/vnd.github.v3+json',
@@ -69,7 +71,7 @@ export async function* fetchGitHubIssuesStream(
       }
 
       if (!response.ok) {
-        console.warn(`[WARN] [GitHub Crawler] API error (${response.status}): ${await response.text()}`);
+        logger.warn(`[WARN] [GitHub Crawler] API error (${response.status}): ${await response.text()}`);
         return;
       }
 
@@ -79,7 +81,7 @@ export async function* fetchGitHubIssuesStream(
       }
       return;
     } catch (err) {
-      console.warn('[GitHub Crawler] Network error during issue stream:', err);
+      logger.warn('[GitHub Crawler] Network error during issue stream:', err);
       attempt++;
     }
   }
@@ -93,11 +95,11 @@ export async function crawlGithubPostMortems(
   workspaceId: string = '00000000-0000-0000-0000-000000000000'
 ): Promise<GitHubIssueCrawlResult> {
   if (!GITHUB_TOKEN) {
-    console.log('[INFO] [GitHub Crawler] GITHUB_ACCESS_TOKEN not configured. Skipping active GitHub sweep.');
+    logger.info('[INFO] [GitHub Crawler] GITHUB_ACCESS_TOKEN not configured. Skipping active GitHub sweep.');
     return { source: 'github', repo, issues_crawled: 0, sops_extracted: 0, status: 'skipped' };
   }
 
-  console.log(`[INFO] [GitHub Crawler] Sweeping post-mortems and incident issues for repo: ${repo}...`);
+  logger.info(`[INFO] [GitHub Crawler] Sweeping post-mortems and incident issues for repo: ${repo}...`);
 
   let sopsExtracted = 0;
   let issuesCrawled = 0;
@@ -120,7 +122,7 @@ export async function crawlGithubPostMortems(
         let commentsText = '';
         if (issue.comments > 0 && issue.comments_url) {
           try {
-            const commentsRes = await fetch(`${issue.comments_url}?per_page=10`, {
+            const commentsRes = await ssrfSafeFetch(`${issue.comments_url}?per_page=10`, {
               headers: {
                 'Authorization': `Bearer ${GITHUB_TOKEN}`,
                 'Accept': 'application/vnd.github.v3+json',
@@ -135,7 +137,7 @@ export async function crawlGithubPostMortems(
               commentsText = comments.map((c) => `[${c.user?.login || 'commenter'}]: ${c.body}`).join('\n');
             }
           } catch (err) {
-            console.warn(`[WARN] [GitHub Crawler] Comments fetch error for issue #${issue.number}:`, err);
+            logger.warn(`[WARN] [GitHub Crawler] Comments fetch error for issue #${issue.number}:`, err);
           }
         }
 
@@ -147,7 +149,18 @@ export async function crawlGithubPostMortems(
         try {
           const extractedSOP = await extractSOPFromThread(issueTranscript, workspaceId, 'github');
           if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
-            const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+            let sopEmbedding: number[] | null = null;
+            try {
+              sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+            } catch (embErr) {
+              await recordEmbeddingFailure({
+                workspaceId,
+                source: 'github',
+                rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
+                error: embErr,
+              });
+              throw embErr;
+            }
 
             const insertPayload: Record<string, any> = {
               workspace_id: workspaceId,
@@ -178,7 +191,8 @@ export async function crawlGithubPostMortems(
             }
           }
         } catch (extractErr) {
-          console.warn(`[WARN] [GitHub Crawler] Extraction skipped for issue #${issue.number}:`, (extractErr as Error).message);
+          if (extractErr instanceof EmbeddingError) throw extractErr;
+          logger.warn(`[WARN] [GitHub Crawler] Extraction skipped for issue #${issue.number}:`, (extractErr as Error).message);
         }
 
         deduplicationBatch.push({ source: 'github', external_id: issueId, target: repo, workspace_id: workspaceId });
@@ -197,7 +211,7 @@ export async function crawlGithubPostMortems(
 
     return { source: 'github', repo, issues_crawled: issuesCrawled, sops_extracted: sopsExtracted, status: 'success' };
   } catch (err) {
-    console.error('[ERROR] [GitHub Crawler] Error during crawl execution:', err);
+    logger.error('[ERROR] [GitHub Crawler] Error during crawl execution:', err);
     return { source: 'github', repo, issues_crawled: issuesCrawled, sops_extracted: sopsExtracted, status: 'error' };
   }
 }

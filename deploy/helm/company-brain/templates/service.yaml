@@ -1,9 +1,10 @@
+{{- $name := include "company-brain.component" (merge (dict "suffix" "api") .) }}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "company-brain.fullname" . }}
   labels:
-    app.kubernetes.io/name: company-brain-api
+    app.kubernetes.io/name: {{ $name }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -16,4 +17,4 @@ spec:
       protocol: TCP
       name: metrics
   selector:
-    app.kubernetes.io/name: company-brain-api
+    app.kubernetes.io/name: {{ $name }}

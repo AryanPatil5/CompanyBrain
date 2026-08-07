@@ -29,7 +29,7 @@ export async function generatePlan(
   // 2. Fetch GraphRAG Connected Entities
   let graphContext = '';
   if (matchingSop?.id) {
-    const connected = await getConnectedEntities(matchingSop.id, 2);
+    const connected = await getConnectedEntities(matchingSop.id, 2, { userRole, workspaceId });
     graphContext = connected.map((c) => `(${c.relationship}) -> ${c.node.name} [${c.node.label}]`).join(', ');
   }
 
@@ -69,7 +69,7 @@ Generate the DAG ExecutionPlan:`;
 
   let rawOutput = '';
   try {
-    rawOutput = await generateText(userPrompt, SYSTEM_PROMPT);
+    rawOutput = await generateText(userPrompt, SYSTEM_PROMPT, { workspaceId, purpose: 'execution_plan' });
   } catch {
     // Fallback if AI provider is offline
   }

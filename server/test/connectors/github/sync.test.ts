@@ -1,8 +1,9 @@
 import assert from 'node:assert';
 
-// Hermetic AI guard: force every provider to fail instantly (no network, no
-// API keys, tiny retry backoff) so generateEmbedding returns null fast. Must be
-// set BEFORE the module graph (aiProvider) is first imported.
+// Hermetic AI guard: force every text-generation provider to fail instantly (no
+// network, no API keys, tiny retry backoff) and stub the Ollama embeddings
+// endpoint with a genuine 1536-dim vector so the chunk pipeline indexes real
+// vectors. Must be set BEFORE the module graph (aiProvider) is first imported.
 process.env.AI_PROVIDER_PRIORITY = 'ollama';
 process.env.OLLAMA_HOST = 'http://127.0.0.1:1';
 process.env.GEMINI_API_KEY = '';
@@ -228,9 +229,8 @@ function jsonResponse(body: unknown, headers: Record<string, string> = {}): Resp
 }
 
 function makeFetchRouter() {
-  return async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+  return async (input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    const method = init?.method || (input instanceof Request ? input.method : 'GET');
 
     if (url.includes('/graphql')) {
       return jsonResponse(DISCUSSION_PAGE);
@@ -244,6 +244,10 @@ function makeFetchRouter() {
       if (file === 'src/new.ts') return new Response('export const brandNew = true;', { status: 200 });
       if (file === 'Makefile') return new Response('build:\n\tnpm run build\n', { status: 200 });
       return new Response('', { status: 404 });
+    }
+
+    if (url.includes('/api/embeddings')) {
+      return jsonResponse({ embedding: new Array(1536).fill(0.01) });
     }
 
     const pathname = new URL(url).pathname;

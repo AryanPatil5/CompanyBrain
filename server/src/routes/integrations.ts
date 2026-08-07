@@ -1,8 +1,11 @@
+import { logger } from '../logger.js';
 import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { authenticate, requireRole, type AuthenticatedRequest } from '../middleware/auth.js';
 import { supabase } from '../config/supabase.js';
-import { storeIntegrationCredential, getIntegrationCredential, encryptSecret, decryptSecret } from '../services/integrations/secrets.js';
+import { storeIntegrationCredential, encryptSecret, decryptSecret } from '../services/integrations/secrets.js';
+import { ssrfSafeFetch } from '../services/security/ssrfGuard.js';
+import { isProduction } from '../services/security/keyProvider.js';
 
 const router = Router();
 
@@ -129,7 +132,7 @@ router.get('/platform-config', authenticate, requireRole(['admin']), async (req:
     );
 
     res.json({ success: true, platform_config: result });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Failed to fetch platform OAuth configuration.' });
   }
 });
@@ -167,13 +170,13 @@ router.post('/platform-config/:provider', authenticate, requireRole(['admin']), 
       .upsert(upsertPayload, { onConflict: 'provider' });
 
     if (error) {
-      console.error(`[Platform Config Error] Failed to save ${provider} config:`, error);
+      logger.error(`[Platform Config Error] Failed to save ${provider} config:`, error);
       res.status(500).json({ error: 'Database error saving platform configuration.' });
       return;
     }
 
     res.json({ success: true, message: `Successfully updated ${provider} platform OAuth configuration.` });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: 'Internal server error saving platform configuration.' });
   }
 });
@@ -232,7 +235,7 @@ router.get('/status', authenticate, async (req: Request, res: Response): Promise
 
     res.json({ success: true, workspace_id: workspaceId, integrations: result });
   } catch (err) {
-    console.error('[Integrations Error] Failed to fetch status:', err);
+    logger.error('[Integrations Error] Failed to fetch status:', err);
     res.status(500).json({ error: 'Internal server error while fetching integration status.' });
   }
 });
@@ -246,7 +249,7 @@ router.post('/:provider/disconnect', authenticate, requireRole(['admin']), async
     await supabase.from('integration_installations').delete().eq('workspace_id', user.workspace_id).eq('provider', provider);
 
     res.json({ success: true, message: `Disconnected ${provider} integration successfully.` });
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: `Failed to disconnect ${req.params.provider} integration.` });
   }
 });
@@ -308,7 +311,7 @@ router.post('/:provider/connect-url', authenticate, requireRole(['admin']), asyn
       demo_mode: isDemoMode,
     });
   } catch (err) {
-    console.error('[Connect URL Error]:', err);
+    logger.error('[Connect URL Error]:', err);
     res.status(500).json({ error: 'Failed to generate authorization URL.' });
   }
 });
@@ -333,7 +336,7 @@ router.get('/slack/callback', async (req: Request, res: Response): Promise<void>
     let accessToken = 'xoxb-mock-demo-slack-token';
 
     if (clientId && clientSecret && code) {
-      const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
+      const tokenRes = await ssrfSafeFetch('https://slack.com/api/oauth.v2.access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -351,7 +354,7 @@ router.get('/slack/callback', async (req: Request, res: Response): Promise<void>
       }
       teamId = data.team?.id || teamId;
       accessToken = data.access_token || accessToken;
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (isProduction()) {
       res.redirect(`${CLIENT_BASE_URL}?error=slack_oauth_not_configured`);
       return;
     }
@@ -370,7 +373,7 @@ router.get('/slack/callback', async (req: Request, res: Response): Promise<void>
 
     res.redirect(`${CLIENT_BASE_URL}?connected=slack`);
   } catch (err) {
-    console.error('[Slack Callback Error]:', err);
+    logger.error('[Slack Callback Error]:', err);
     res.redirect(`${CLIENT_BASE_URL}?error=slack_callback_error`);
   }
 });
@@ -387,9 +390,9 @@ router.get('/github/callback', async (req: Request, res: Response): Promise<void
       return;
     }
 
-    const installId = installation_id || (process.env.NODE_ENV !== 'production' ? 'gh_inst_demo_99' : '');
+    const installId = installation_id || (!isProduction() ? 'gh_inst_demo_99' : '');
 
-    if (!installId && process.env.NODE_ENV === 'production') {
+    if (!installId && isProduction()) {
       res.redirect(`${CLIENT_BASE_URL}?error=github_installation_missing`);
       return;
     }
@@ -407,7 +410,7 @@ router.get('/github/callback', async (req: Request, res: Response): Promise<void
 
     res.redirect(`${CLIENT_BASE_URL}?connected=github`);
   } catch (err) {
-    console.error('[GitHub Callback Error]:', err);
+    logger.error('[GitHub Callback Error]:', err);
     res.redirect(`${CLIENT_BASE_URL}?error=github_callback_error`);
   }
 });
@@ -432,7 +435,7 @@ router.get('/gmail/callback', async (req: Request, res: Response): Promise<void>
     let refreshToken = '1//mock-gmail-refresh-token';
 
     if (clientId && clientSecret && code) {
-      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      const tokenRes = await ssrfSafeFetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -452,7 +455,7 @@ router.get('/gmail/callback', async (req: Request, res: Response): Promise<void>
 
       accessToken = tokens.access_token || accessToken;
       refreshToken = tokens.refresh_token || refreshToken;
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (isProduction()) {
       res.redirect(`${CLIENT_BASE_URL}?error=gmail_oauth_not_configured`);
       return;
     }
@@ -467,7 +470,7 @@ router.get('/gmail/callback', async (req: Request, res: Response): Promise<void>
 
     res.redirect(`${CLIENT_BASE_URL}?connected=gmail`);
   } catch (err) {
-    console.error('[Gmail Callback Error]:', err);
+    logger.error('[Gmail Callback Error]:', err);
     res.redirect(`${CLIENT_BASE_URL}?error=gmail_callback_error`);
   }
 });

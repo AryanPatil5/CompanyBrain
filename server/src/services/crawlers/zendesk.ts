@@ -1,8 +1,10 @@
+import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
 import { extractSOPFromThread } from '../extractor.js';
 import { createVersion } from '../freshness.js';
-import { generateEmbedding } from '../embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
+import { ssrfSafeFetch } from '../security/ssrfGuard.js';
 
 dotenv.config();
 
@@ -45,7 +47,7 @@ async function markZendeskTicketCrawled(ticketId: string): Promise<void> {
       target: ZENDESK_SUBDOMAIN,
     });
   } catch (err) {
-    console.warn('[Zendesk Crawler] Failed to record deduplication entry:', err);
+    logger.warn('[Zendesk Crawler] Failed to record deduplication entry:', err);
   }
 }
 
@@ -56,11 +58,11 @@ export async function crawlZendeskTickets(
   workspaceId: string = '00000000-0000-0000-0000-000000000000'
 ): Promise<ZendeskCrawlResult> {
   if (!ZENDESK_TOKEN) {
-    console.log('[INFO] [Zendesk Crawler] ZENDESK_API_TOKEN not configured. Skipping active Zendesk tickets sweep.');
+    logger.info('[INFO] [Zendesk Crawler] ZENDESK_API_TOKEN not configured. Skipping active Zendesk tickets sweep.');
     return { source: 'zendesk', tickets_crawled: 0, sops_extracted: 0, status: 'skipped' };
   }
 
-  console.log(`[INFO] [Zendesk Crawler] Sweeping solved tickets via Zendesk Search API (${ZENDESK_SUBDOMAIN}.zendesk.com)...`);
+  logger.info(`[INFO] [Zendesk Crawler] Sweeping solved tickets via Zendesk Search API (${ZENDESK_SUBDOMAIN}.zendesk.com)...`);
 
   let sopsExtracted = 0;
   let ticketsCrawled = 0;
@@ -69,7 +71,7 @@ export async function crawlZendeskTickets(
     const authHeader = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_TOKEN}`).toString('base64');
     const searchUrl = `https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/search.json?query=type:ticket status:solved`;
 
-    const response = await fetch(searchUrl, {
+    const response = await ssrfSafeFetch(searchUrl, {
       headers: {
         'Authorization': `Basic ${authHeader}`,
         'Accept': 'application/json',
@@ -77,14 +79,14 @@ export async function crawlZendeskTickets(
     });
 
     if (!response.ok) {
-      console.warn(`[WARN] [Zendesk Crawler] API error (${response.status}): ${await response.text()}`);
+      logger.warn(`[WARN] [Zendesk Crawler] API error (${response.status}): ${await response.text()}`);
       return { source: 'zendesk', tickets_crawled: 0, sops_extracted: 0, status: 'error' };
     }
 
     const data = (await response.json()) as any;
     const tickets = data.results || [];
 
-    console.log(`[INFO] [Zendesk Crawler] Found ${tickets.length} solved candidate tickets.`);
+    logger.info(`[INFO] [Zendesk Crawler] Found ${tickets.length} solved candidate tickets.`);
 
     for (const ticket of tickets) {
       const ticketId = `zendesk_${ticket.id}`;
@@ -98,7 +100,7 @@ export async function crawlZendeskTickets(
       // Fetch comments & internal notes
       let commentsText = '';
       try {
-        const commentsRes = await fetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticket.id}/comments.json`, {
+        const commentsRes = await ssrfSafeFetch(`https://${ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticket.id}/comments.json`, {
           headers: { 'Authorization': `Basic ${authHeader}` },
         });
         if (commentsRes.ok) {
@@ -107,7 +109,7 @@ export async function crawlZendeskTickets(
           commentsText = comments.map((c: any) => `[Comment by ${c.author_id}]: ${c.body}`).join('\n');
         }
       } catch (err) {
-        console.warn(`[WARN] [Zendesk Crawler] Failed to fetch comments for ticket #${ticket.id}:`, err);
+        logger.warn(`[WARN] [Zendesk Crawler] Failed to fetch comments for ticket #${ticket.id}:`, err);
       }
 
       const ticketTranscript = [
@@ -119,7 +121,18 @@ export async function crawlZendeskTickets(
         const extractedSOP = await extractSOPFromThread(ticketTranscript, workspaceId, 'zendesk');
 
         if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
-          const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          let sopEmbedding: number[] | null = null;
+          try {
+            sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          } catch (embErr) {
+            await recordEmbeddingFailure({
+              workspaceId,
+              source: 'zendesk',
+              rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
+              error: embErr,
+            });
+            throw embErr;
+          }
 
           const insertPayload: Record<string, any> = {
             workspace_id: workspaceId,
@@ -147,11 +160,12 @@ export async function crawlZendeskTickets(
           if (!insertErr && sopData) {
             await createVersion(sopData.id, 'zendesk_crawler', 'initial_extraction');
             sopsExtracted++;
-            console.log(`[SUCCESS] [Zendesk Crawler] Extracted SOP "${sopData.title}" from Ticket #${ticket.id}`);
+            logger.info(`[SUCCESS] [Zendesk Crawler] Extracted SOP "${sopData.title}" from Ticket #${ticket.id}`);
           }
         }
       } catch (extractErr) {
-        console.warn(`[WARN] [Zendesk Crawler] Extraction skipped for ticket #${ticket.id}:`, (extractErr as Error).message);
+        if (extractErr instanceof EmbeddingError) throw extractErr;
+        logger.warn(`[WARN] [Zendesk Crawler] Extraction skipped for ticket #${ticket.id}:`, (extractErr as Error).message);
       }
 
       await markZendeskTicketCrawled(ticketId);
@@ -159,7 +173,7 @@ export async function crawlZendeskTickets(
 
     return { source: 'zendesk', tickets_crawled: ticketsCrawled, sops_extracted: sopsExtracted, status: 'success' };
   } catch (err) {
-    console.error('[ERROR] [Zendesk Crawler] Error during crawl execution:', err);
+    logger.error('[ERROR] [Zendesk Crawler] Error during crawl execution:', err);
     return { source: 'zendesk', tickets_crawled: ticketsCrawled, sops_extracted: sopsExtracted, status: 'error' };
   }
 }

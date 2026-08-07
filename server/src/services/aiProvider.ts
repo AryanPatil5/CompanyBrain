@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import { logger } from '../logger.js';
+import { recordUsage, usageFromContext } from './costMeter.js';
 
 dotenv.config();
 
@@ -49,19 +50,20 @@ function timeoutFor(provider: AIProviderName): number {
 }
 
 const GEMINI_TIMEOUT_MS = Math.max(timeoutFor('gemini'), 15_000);
+const OPENROUTER_TIMEOUT_MS = Math.max(timeoutFor('openrouter'), 60_000);
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const ENABLE_OLLAMA = process.env.ENABLE_OLLAMA === 'true';
-const OLLAMA_HOST = (process.env.OLLAMA_HOST || process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/+$/, '');
+const OLLAMA_HOST =(process.env.OLLAMA_HOST ||process.env.OLLAMA_BASE_URL ||'http://localhost:11434').replace(/\/+$/, '');
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || '~deepseek/deepseek-v4-flash-latest';
+const OPENROUTER_MODEL =process.env.OPENROUTER_MODEL ||'deepseek/deepseek-v4-flash-0731';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 
-const OPENROUTER_REFERER = process.env.APP_BASE_URL || 'http://localhost:5001';
+const OPENROUTER_REFERER =process.env.APP_BASE_URL ||'http://localhost:5001';
 
 function modelFor(provider: AIProviderName): string {
   switch (provider) {
@@ -104,16 +106,70 @@ export class AIProviderAggregateError extends Error {
   }
 }
 
+/**
+ * Dimension required by the Supabase pgvector schema (vector(1536)).
+ * Embeddings that do not match exactly are rejected — never padded or truncated.
+ */
+export const EMBEDDING_DIMENSIONS = 1536;
+
+export type EmbeddingErrorCode =
+  | 'embedding_empty_input'
+  | 'embedding_provider_unreachable'
+  | 'embedding_provider_http_error'
+  | 'embedding_invalid_response'
+  | 'embedding_dimension_mismatch';
+
+/**
+ * Typed error for embedding generation failures. Thrown instead of silently
+ * returning fake/deterministic vectors, so callers can fail loudly, record
+ * ingestion state, and preserve retry behaviour.
+ */
+export class EmbeddingError extends Error {
+  readonly code: EmbeddingErrorCode;
+  readonly provider: string;
+  readonly retryable: boolean;
+  readonly status?: number;
+  readonly dimensions?: number;
+
+  constructor(
+    code: EmbeddingErrorCode,
+    message: string,
+    options: { provider?: string; retryable?: boolean; status?: number; dimensions?: number } = {}
+  ) {
+    super(message);
+    this.name = 'EmbeddingError';
+    this.code = code;
+    this.provider = options.provider ?? 'ollama';
+    this.retryable = options.retryable ?? false;
+    this.status = options.status;
+    this.dimensions = options.dimensions;
+  }
+}
+
+function normalizeEmbeddingFailure(err: unknown): EmbeddingError {
+  if (err instanceof EmbeddingError) return err;
+
+  const message = err instanceof Error ? err.message : String(err);
+  const name = err instanceof Error ? err.name : '';
+  if (name === 'AbortError' || /aborted|timed out|timeout/i.test(message)) {
+    return new EmbeddingError('embedding_provider_unreachable', `Embedding request timed out: ${message}`, { retryable: true });
+  }
+  // Network-level failures (connection refused, DNS, etc.) are retryable.
+  return new EmbeddingError('embedding_provider_unreachable', `Embedding request failed: ${message}`, { retryable: true });
+}
+
 function normalizeError(provider: string, err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
 
   const message = err instanceof Error ? err.message : String(err);
   const name = err instanceof Error ? err.name : '';
+  const status = err instanceof Object && typeof (err as any).status === 'number' ? (err as any).status : undefined;
 
   logger.debug('ai_provider_raw_error', {
     provider,
     name,
     message,
+    status,
     cause: err instanceof Error ? (err as any).cause : undefined,
     stack: err instanceof Error ? err.stack : undefined,
   });
@@ -129,6 +185,23 @@ function normalizeError(provider: string, err: unknown): ProviderError {
     });
   }
 
+  if (/quota|resource_exhausted|rate limit/i.test(message)) {
+    return new ProviderError(provider, message, {
+        retryable: false,
+    });
+}
+
+if (/credit balance|billing|invalid_request_error/i.test(message)) {
+    return new ProviderError(provider, message, {
+        retryable: false,
+    });
+}
+  if (status !== undefined && status >= 400 && status < 500) {
+    return new ProviderError(provider, message, { status, retryable: false });
+  }
+  if (status !== undefined && status >= 500) {
+    return new ProviderError(provider, message, { status, retryable: true });
+  }
   return new ProviderError(provider, `${provider} request failed: ${message}`, {
     retryable: true,
   });
@@ -136,13 +209,19 @@ function normalizeError(provider: string, err: unknown): ProviderError {
 
 // ─── Abort + retry primitives ────────────────────────────────────────────────
 
-async function withTimeout<T>(timeoutMs: number, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withTimeout<T>(timeoutMs: number, fn: (signal: AbortSignal) => Promise<T>, externalSignal?: AbortSignal): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
   try {
     return await fn(controller.signal);
   } finally {
     clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -157,19 +236,22 @@ function backoffDelayMs(attempt: number, retryAfterMs?: number): number {
   return retryAfterMs !== undefined ? Math.max(retryAfterMs, delay) : delay;
 }
 
-async function withRetry(provider: AIProviderName, attemptFn: () => Promise<string>): Promise<string> {
+async function withRetry(provider: AIProviderName, attemptFn: ProviderAdapter, externalSignal?: AbortSignal): Promise<ProviderResult> {
   let lastError: ProviderError | undefined;
   for (let attempt = 0; attempt <= CONFIG.maxRetries; attempt++) {
+    if (externalSignal?.aborted) {
+      throw new ProviderError(provider, `${provider} request cancelled`, { retryable: false });
+    }
     const startedAt = Date.now();
     try {
-      const text = await attemptFn();
+      const result = await attemptFn(externalSignal);
       logger.info('ai_provider_success', {
         provider,
         model: modelFor(provider),
         attempt,
         latencyMs: Date.now() - startedAt,
       });
-      return text;
+      return result;
     } catch (err) {
       lastError = normalizeError(provider, err);
       logger.warn('ai_provider_failure', {
@@ -181,7 +263,7 @@ async function withRetry(provider: AIProviderName, attemptFn: () => Promise<stri
         latencyMs: Date.now() - startedAt,
         message: lastError.message,
       });
-      if (!lastError.retryable || attempt >= CONFIG.maxRetries) {
+      if (!lastError.retryable || attempt >= CONFIG.maxRetries || externalSignal?.aborted) {
         throw lastError;
       }
       const delayMs = backoffDelayMs(attempt, lastError.retryAfterMs);
@@ -199,17 +281,34 @@ async function withRetry(provider: AIProviderName, attemptFn: () => Promise<stri
 
 // ─── HTTP response classification ────────────────────────────────────────────
 
-async function throwForHttpStatus(provider: AIProviderName, res: Response): Promise<void> {
+async function readErrorBody(res: Response): Promise<string> {
+  try {
+    const body: any = await res.json();
+    if (typeof body?.error?.message === 'string') return body.error.message;
+    if (typeof body?.message === 'string') return body.message;
+  } catch {
+    // Non-JSON error body
+  }
+  try {
+    const text = await res.text();
+    return text.slice(0, 300);
+  } catch {
+    return '';
+  }
+}
+
+async function throwForHttpStatus(provider: AIProviderName, res: Response, bodyMessage?: string): Promise<void> {
+  const detail = bodyMessage ? `: ${bodyMessage}` : '';
   if (res.status === 429) {
     const retryAfterSec = Number.parseInt(res.headers.get('retry-after') ?? '', 10);
     const retryAfterMs = Number.isFinite(retryAfterSec) ? retryAfterSec * 1000 : undefined;
-    throw new ProviderError(provider, `${provider} quota exceeded (HTTP 429)`, { status: 429, retryable: false, retryAfterMs });
+    throw new ProviderError(provider, `${provider} quota exceeded (HTTP 429)${detail}`, { status: 429, retryable: false, retryAfterMs });
   }
   if (res.status >= 500) {
-    throw new ProviderError(provider, `${provider} returned HTTP ${res.status} ${res.statusText}`, { status: res.status, retryable: true });
+    throw new ProviderError(provider, `${provider} returned HTTP ${res.status} ${res.statusText}${detail}`, { status: res.status, retryable: true });
   }
   if (res.status >= 400) {
-    throw new ProviderError(provider, `${provider} returned HTTP ${res.status} ${res.statusText}`, { status: res.status, retryable: false });
+    throw new ProviderError(provider, `${provider} returned HTTP ${res.status} ${res.statusText}${detail}`, { status: res.status, retryable: false });
   }
 }
 
@@ -233,13 +332,21 @@ if (ANTHROPIC_API_KEY) {
   }
 }
 
-type ProviderAdapter = () => Promise<string>;
+type ProviderAdapter = (signal?: AbortSignal) => Promise<ProviderResult>;
+
+export interface ProviderResult {
+  text: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+  };
+}
 
 function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName, ProviderAdapter> {
   const adapters = new Map<AIProviderName, ProviderAdapter>();
 
   if (geminiClient && GEMINI_API_KEY) {
-    adapters.set('gemini', async () =>
+    adapters.set('gemini', (raceSignal) =>
       withTimeout(GEMINI_TIMEOUT_MS, async (signal) => {
         const response = await geminiClient!.models.generateContent({
           model: GEMINI_MODEL,
@@ -253,13 +360,23 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
         });
         const text = response.text?.trim();
         if (!text) throw new ProviderError('gemini', 'Gemini returned an empty response', { retryable: false });
-        return text;
-      }),
+        const metadata: any = response.usageMetadata;
+        return {
+          text,
+          usage:
+            metadata && typeof metadata.promptTokenCount === 'number'
+              ? {
+                  promptTokens: metadata.promptTokenCount,
+                  completionTokens: metadata.candidatesTokenCount ?? 0,
+                }
+              : undefined,
+        };
+      }, raceSignal),
     );
   }
 
   if (anthropicClient && ANTHROPIC_API_KEY) {
-    adapters.set('anthropic', async () =>
+    adapters.set('anthropic', (raceSignal) =>
       withTimeout(timeoutFor('anthropic'), async (signal) => {
         const message = await anthropicClient!.messages.create(
           {
@@ -277,14 +394,23 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
           .join('')
           .trim();
         if (!text) throw new ProviderError('anthropic', 'Anthropic returned an empty response', { retryable: false });
-        return text;
-      }),
+        return {
+          text,
+          usage:
+            message.usage && typeof message.usage.input_tokens === 'number'
+              ? {
+                  promptTokens: message.usage.input_tokens,
+                  completionTokens: message.usage.output_tokens ?? 0,
+                }
+              : undefined,
+        };
+      }, raceSignal),
     );
   }
 
   if (OPENROUTER_API_KEY) {
-    adapters.set('openrouter', async () =>
-      withTimeout(timeoutFor('openrouter'), async (signal) => {
+    adapters.set('openrouter', (raceSignal) =>
+      withTimeout(OPENROUTER_TIMEOUT_MS, async (signal) => {
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -303,17 +429,29 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
             temperature: 0.1,
           }),
         });
-        if (!res.ok) await throwForHttpStatus('openrouter', res);
+        if (!res.ok) {
+          const bodyMessage = await readErrorBody(res);
+          await throwForHttpStatus('openrouter', res, bodyMessage);
+        }
         const data = await res.json();
         const text = data.choices?.[0]?.message?.content?.trim();
         if (!text) throw new ProviderError('openrouter', 'OpenRouter returned an empty response', { retryable: false });
-        return text;
-      }),
+        return {
+          text,
+          usage:
+            data.usage && typeof data.usage.prompt_tokens === 'number'
+              ? {
+                  promptTokens: data.usage.prompt_tokens,
+                  completionTokens: data.usage.completion_tokens ?? 0,
+                }
+              : undefined,
+        };
+      }, raceSignal),
     );
   }
 
   if (ENABLE_OLLAMA) {
-    adapters.set('ollama', async () =>
+    adapters.set('ollama', (raceSignal) =>
       withTimeout(timeoutFor('ollama'), async (signal) => {
         const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
           method: 'POST',
@@ -329,8 +467,17 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
         const data = await res.json();
         const text = typeof data.response === 'string' ? data.response.trim() : '';
         if (!text) throw new ProviderError('ollama', 'Ollama returned an empty response', { retryable: false });
-        return text;
-      }),
+        return {
+          text,
+          usage:
+            typeof data.prompt_eval_count === 'number'
+              ? {
+                  promptTokens: data.prompt_eval_count,
+                  completionTokens: data.eval_count ?? 0,
+                }
+              : undefined,
+        };
+      }, raceSignal),
     );
   }
 
@@ -339,7 +486,13 @@ function buildAdapters(prompt: string, systemPrompt: string): Map<AIProviderName
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-export async function generateText(prompt: string, systemPrompt?: string): Promise<string> {
+export interface GenerateTextOptions {
+  workspaceId?: string;
+  correlationId?: string;
+  purpose?: string;
+}
+
+export async function generateText(prompt: string, systemPrompt?: string, options?: GenerateTextOptions): Promise<string> {
   const fullSystemPrompt = systemPrompt || 'You are an Enterprise Knowledge AI Assistant.';
   const adapters = buildAdapters(prompt, fullSystemPrompt);
   let enabled = CONFIG.priority.filter((provider) => adapters.has(provider));
@@ -361,21 +514,41 @@ export async function generateText(prompt: string, systemPrompt?: string): Promi
     maxRetries: CONFIG.maxRetries,
   });
 
+  const raceController = new AbortController();
   const attempts = enabled.map((provider, index) => {
-    const attempt = withRetry(provider, adapters.get(provider)!).then((text) => ({ provider, text }));
+    const attempt = withRetry(provider, adapters.get(provider)!, raceController.signal).then((result) => ({ provider, result }));
     const startDelayMs = index * CONFIG.staggerMs;
     return startDelayMs > 0 ? sleep(startDelayMs).then(() => attempt) : attempt;
   });
 
   try {
     const winner = await Promise.any(attempts);
+    raceController.abort();
+    const model = modelFor(winner.provider);
+    const latencyMs = Date.now() - startedAt;
     logger.info('ai_provider_selected', {
       provider: winner.provider,
-      model: modelFor(winner.provider),
-      latencyMs: Date.now() - startedAt,
+      model,
+      latencyMs,
+      purpose: options?.purpose,
     });
-    return winner.text;
+
+    const usage = winner.result.usage;
+    const promptTokens = usage?.promptTokens ?? 0;
+    const completionTokens = usage?.completionTokens ?? 0;
+    void recordUsage(
+      usageFromContext(
+        winner.provider,
+        model,
+        { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
+        latencyMs,
+        options?.workspaceId
+      )
+    );
+
+    return winner.result.text;
   } catch (err) {
+    raceController.abort();
     const aggregate = err instanceof AggregateError ? err : new AggregateError([err as Error], 'All AI providers failed');
     const errors = aggregate.errors.map((e) => normalizeError('unknown', e));
     const failure = new AIProviderAggregateError(errors, aggregate);
@@ -389,53 +562,87 @@ export async function generateText(prompt: string, systemPrompt?: string): Promi
 }
 
 /**
- * Generates vector embeddings for a string or string array using local Ollama (nomic-embed-text).
- * Returns normalized 1536-dimensional array compatible with Supabase pgvector schema.
+ * Generates vector embeddings for a string or string array using local Ollama.
+ * Returns a normalized EMBEDDING_DIMENSIONS (1536) dimensional array compatible
+ * with the Supabase pgvector schema.
+ *
+ * Never fabricates vectors: if embeddings cannot be generated, a typed
+ * EmbeddingError is thrown (no deterministic pseudo-vectors, no zero padding).
+ * Retryable failures (network, 5xx) are retried with backoff.
  */
 export async function generateEmbeddings(textInput: string | string[]): Promise<number[]> {
   const text = Array.isArray(textInput) ? textInput.join(' ') : textInput;
   const cleanText = text.trim();
 
   if (!cleanText) {
-    return new Array(1536).fill(0);
+    throw new EmbeddingError('embedding_empty_input', 'Cannot embed empty text: no input provided', { retryable: false });
   }
 
-  try {
-    const rawVector = await withTimeout(timeoutFor('ollama'), async (signal) => {
-      const res = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal,
-        body: JSON.stringify({
-          model: process.env.EMBEDDING_MODEL || 'nomic-embed-text',
-          prompt: cleanText,
-        }),
+  const model = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
+  let lastError: EmbeddingError | undefined;
+
+  for (let attempt = 0; attempt <= CONFIG.maxRetries; attempt++) {
+    const startedAt = Date.now();
+    try {
+      const rawVector = await withTimeout(timeoutFor('ollama'), async (signal) => {
+        const res = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal,
+          body: JSON.stringify({ model, prompt: cleanText }),
+        });
+        if (!res.ok) {
+          const detail = (await readErrorBody(res)).slice(0, 200);
+          const retryable = res.status === 429 ? false : res.status >= 500;
+          throw new EmbeddingError(
+            'embedding_provider_http_error',
+            `Ollama embeddings returned HTTP ${res.status} ${res.statusText}${detail ? `: ${detail}` : ''}`,
+            { status: res.status, retryable }
+          );
+        }
+        const data = await res.json();
+        const embedding: unknown = data.embedding ?? data.embeddings?.[0];
+        if (!Array.isArray(embedding) || embedding.length === 0) {
+          throw new EmbeddingError('embedding_invalid_response', 'Ollama returned an empty embedding', { retryable: false });
+        }
+        return embedding as number[];
       });
-      if (!res.ok) throw new ProviderError('ollama', `Ollama embeddings returned HTTP ${res.status}`, { status: res.status, retryable: false });
-      const data = await res.json();
-      const embedding: number[] = data.embedding || data.embeddings?.[0] || [];
-      if (!Array.isArray(embedding) || embedding.length === 0) {
-        throw new ProviderError('ollama', 'Ollama returned an empty embedding', { retryable: false });
+
+      if (!rawVector.every((value) => typeof value === 'number' && Number.isFinite(value))) {
+        throw new EmbeddingError('embedding_invalid_response', 'Ollama returned a non-numeric embedding', { retryable: false });
       }
-      return embedding;
-    });
+      if (rawVector.length !== EMBEDDING_DIMENSIONS) {
+        throw new EmbeddingError(
+          'embedding_dimension_mismatch',
+          `Embedding dimension ${rawVector.length} does not match required ${EMBEDDING_DIMENSIONS}; refusing to pad or truncate vectors`,
+          { dimensions: rawVector.length, retryable: false }
+        );
+      }
 
-    // Normalize vector length to 1536 for Supabase pgvector alignment
-    if (rawVector.length === 1536) return rawVector;
-    if (rawVector.length < 1536) {
-      return [...rawVector, ...new Array(1536 - rawVector.length).fill(0)];
+      logger.info('ai_embedding_success', {
+        provider: 'ollama',
+        model,
+        dimensions: rawVector.length,
+        attempt,
+        latencyMs: Date.now() - startedAt,
+      });
+      return rawVector;
+    } catch (err) {
+      lastError = normalizeEmbeddingFailure(err);
+      logger.warn('ai_embedding_failure', {
+        provider: 'ollama',
+        model,
+        attempt,
+        latencyMs: Date.now() - startedAt,
+        code: lastError.code,
+        status: lastError.status,
+        retryable: lastError.retryable,
+        message: lastError.message,
+      });
+      if (!lastError.retryable || attempt >= CONFIG.maxRetries) throw lastError;
+      await sleep(backoffDelayMs(attempt));
     }
-    return rawVector.slice(0, 1536);
-  } catch (err) {
-    logger.warn('ai_embedding_fallback', { message: normalizeError('ollama', err).message });
   }
 
-  // Fallback: Deterministic 1536-dimensional pseudo-embedding vector for offline / test environments
-  const fallbackVector = new Array(1536).fill(0);
-  for (let i = 0; i < cleanText.length; i++) {
-    const charCode = cleanText.charCodeAt(i);
-    const index = (i * 31 + charCode) % 1536;
-    fallbackVector[index] = (fallbackVector[index] + charCode / 255) / 2;
-  }
-  return fallbackVector;
+  throw lastError;
 }

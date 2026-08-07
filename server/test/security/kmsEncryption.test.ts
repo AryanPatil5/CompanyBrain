@@ -48,7 +48,7 @@ export async function runKmsEncryptionTest(): Promise<boolean> {
     await decryptSecret(tamperedPayload);
     console.error('❌ KMS TEST FAILED: Decrypting tampered payload did not throw authTag validation error!');
     return false;
-  } catch (tamperErr: any) {
+  } catch {
     console.log('✅ KMS TEST PASSED: AES-256-GCM authTag tamper detection successfully caught modified payload.');
   }
 

@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { generateText } from '../aiProvider.js';
 
 export interface GroundingScoreResult {
@@ -92,7 +93,7 @@ Evaluate claim grounding and return JSON:`;
       passedThreshold,
     };
   } catch (err: any) {
-    console.warn('[HallucinationEvaluator Warning] LLM grounding check failed or timed out. Failing closed for security:', err.message);
+    logger.warn('[HallucinationEvaluator Warning] LLM grounding check failed or timed out. Failing closed for security:', err.message);
     // Fail-closed security design: Fail closed on LLM unavailable/unparseable responses
     return {
       groundingScore: 0.0,

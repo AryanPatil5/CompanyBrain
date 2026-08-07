@@ -1,8 +1,10 @@
+import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
 import { extractSOPFromThread } from '../extractor.js';
 import { createVersion } from '../freshness.js';
-import { generateEmbedding } from '../embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
+import { ssrfSafeFetch } from '../security/ssrfGuard.js';
 
 dotenv.config();
 
@@ -45,7 +47,7 @@ async function markLinearIssueCrawled(linearIssueId: string, workspaceId: string
       workspace_id: workspaceId,
     });
   } catch (err) {
-    console.warn('[Linear Crawler] Failed to record deduplication entry:', err);
+    logger.warn('[Linear Crawler] Failed to record deduplication entry:', err);
   }
 }
 
@@ -56,11 +58,11 @@ export async function crawlLinearIncidents(
   workspaceId: string = '00000000-0000-0000-0000-000000000000'
 ): Promise<LinearCrawlResult> {
   if (!LINEAR_API_KEY) {
-    console.log('[INFO] [Linear Crawler] LINEAR_API_KEY not configured. Skipping active Linear incident sweep.');
+    logger.info('[INFO] [Linear Crawler] LINEAR_API_KEY not configured. Skipping active Linear incident sweep.');
     return { source: 'linear', issues_crawled: 0, sops_extracted: 0, status: 'skipped' };
   }
 
-  console.log('[INFO] [Linear Crawler] Sweeping high-priority (P0/P1) incident tickets from Linear GraphQL API...');
+  logger.info('[INFO] [Linear Crawler] Sweeping high-priority (P0/P1) incident tickets from Linear GraphQL API...');
 
   let sopsExtracted = 0;
   let issuesCrawled = 0;
@@ -102,7 +104,7 @@ export async function crawlLinearIncidents(
       `,
     };
 
-    const response = await fetch('https://api.linear.app/graphql', {
+    const response = await ssrfSafeFetch('https://api.linear.app/graphql', {
       method: 'POST',
       headers: {
         'Authorization': LINEAR_API_KEY,
@@ -112,14 +114,14 @@ export async function crawlLinearIncidents(
     });
 
     if (!response.ok) {
-      console.warn(`[WARN] [Linear Crawler] GraphQL API error (${response.status}): ${await response.text()}`);
+      logger.warn(`[WARN] [Linear Crawler] GraphQL API error (${response.status}): ${await response.text()}`);
       return { source: 'linear', issues_crawled: 0, sops_extracted: 0, status: 'error' };
     }
 
     const result = await response.json();
     const issues = result?.data?.issues?.nodes || [];
 
-    console.log(`[INFO] [Linear Crawler] Found ${issues.length} completed high-priority Linear tickets.`);
+    logger.info(`[INFO] [Linear Crawler] Found ${issues.length} completed high-priority Linear tickets.`);
 
     for (const issue of issues) {
       const issueId = `linear_${issue.id || issue.identifier}`;
@@ -149,7 +151,18 @@ export async function crawlLinearIncidents(
         const extractedSOP = await extractSOPFromThread(ticketTranscript, workspaceId, 'linear');
 
         if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
-          const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          let sopEmbedding: number[] | null = null;
+          try {
+            sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          } catch (embErr) {
+            await recordEmbeddingFailure({
+              workspaceId,
+              source: 'linear',
+              rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
+              error: embErr,
+            });
+            throw embErr;
+          }
 
           const insertPayload: Record<string, any> = {
             workspace_id: workspaceId,
@@ -177,11 +190,12 @@ export async function crawlLinearIncidents(
           if (!insertErr && sopData) {
             await createVersion(sopData.id, 'linear_crawler', 'initial_extraction');
             sopsExtracted++;
-            console.log(`[SUCCESS] [Linear Crawler] Extracted SOP "${sopData.title}" from Ticket ${issue.identifier}`);
+            logger.info(`[SUCCESS] [Linear Crawler] Extracted SOP "${sopData.title}" from Ticket ${issue.identifier}`);
           }
         }
       } catch (extractErr) {
-        console.warn(`[WARN] [Linear Crawler] Extraction skipped for Linear ticket ${issue.identifier}:`, (extractErr as Error).message);
+        if (extractErr instanceof EmbeddingError) throw extractErr;
+        logger.warn(`[WARN] [Linear Crawler] Extraction skipped for Linear ticket ${issue.identifier}:`, (extractErr as Error).message);
       }
 
       // Mark as processed in deduplication table
@@ -190,7 +204,7 @@ export async function crawlLinearIncidents(
 
     return { source: 'linear', issues_crawled: issuesCrawled, sops_extracted: sopsExtracted, status: 'success' };
   } catch (err) {
-    console.error('[ERROR] [Linear Crawler] Error during crawl execution:', err);
+    logger.error('[ERROR] [Linear Crawler] Error during crawl execution:', err);
     return { source: 'linear', issues_crawled: issuesCrawled, sops_extracted: sopsExtracted, status: 'error' };
   }
 }

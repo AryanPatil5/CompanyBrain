@@ -9,11 +9,7 @@ export default defineConfig({
   },
   server: {
     port: 3000, // Changed from 8080 to 3000 to avoid port conflict with FastMCP
-    allowedHosts: [
-      '.ngrok-free.dev',
-      '.ngrok.io',
-      '.trycloudflare.com',
-    ],
+    allowedHosts: [".ngrok-free.dev", ".ngrok.io", ".trycloudflare.com"],
   },
   plugins: [
     tailwindcss(),

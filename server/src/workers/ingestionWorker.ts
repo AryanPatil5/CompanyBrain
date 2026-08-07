@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { Worker, Queue, type Job } from 'bullmq';
 import { redisConnection } from '../queue/ingestionQueue.js';
 import { supabase } from '../config/supabase.js';
@@ -9,8 +10,14 @@ import {
   crawlEmailInbox,
   crawlDatabaseLogs,
 } from '../services/crawler.js';
-import { parseDocument } from '../services/parsers/documentParser.js';
 import { startTraceSpan, recordMetric } from '../middleware/telemetry.js';
+import {
+  checkBullMQQueueCounts,
+  checkRedis,
+  checkSupabase,
+  startHealthServer,
+} from '../services/health.js';
+import { ingestionQueue } from '../queue/ingestionQueue.js';
 
 export interface IngestionJobData {
   job_name: 'crawl_slack' | 'crawl_github' | 'crawl_linear' | 'crawl_zendesk' | 'crawl_email' | 'crawl_db' | 'all';
@@ -57,7 +64,7 @@ async function logJobLifecycle(params: {
       });
     }
   } catch (logErr) {
-    console.warn('[IngestionWorker Warning] Failed to write audit log:', logErr);
+    logger.warn('[IngestionWorker Warning] Failed to write audit log:', logErr);
   }
 }
 
@@ -69,7 +76,7 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
       const span = startTraceSpan(`BullMQ Job ${job_name}`, { jobId: job.id, workspaceId: workspace_id });
       const startTime = Date.now();
 
-      console.log(`[IngestionWorker] Processing job ${job.id} (${job_name}) for workspace ${workspace_id}... (Attempt #${job.attemptsMade + 1})`);
+      logger.info(`[IngestionWorker] Processing job ${job.id} (${job_name}) for workspace ${workspace_id}... (Attempt #${job.attemptsMade + 1})`);
 
       await job.updateProgress(10);
       await logJobLifecycle({ jobId: job.id!, jobName: job_name, workspaceId: workspace_id, status: 'started' });
@@ -153,16 +160,16 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
   );
 
   worker.on('completed', (job) => {
-    console.log(`[IngestionWorker] Job ${job.id} (${job.name}) completed successfully.`);
+    logger.info(`[IngestionWorker] Job ${job.id} (${job.name}) completed successfully.`);
   });
 
   worker.on('failed', async (job, err) => {
-    console.error(`[IngestionWorker] Job ${job?.id} (${job?.name}) failed:`, err.message);
+    logger.error(`[IngestionWorker] Job ${job?.id} (${job?.name}) failed:`, err.message);
 
     if (job) {
       // Check if job exhausted maximum attempts (3) -> route to Dead-Letter Queue (DLQ)
       if (job.attemptsMade >= (job.opts.attempts || 3)) {
-        console.warn(`[IngestionWorker] Job ${job.id} reached maximum retries. Routing to Dead-Letter Queue (ingestion-dlq)...`);
+        logger.warn(`[IngestionWorker] Job ${job.id} reached maximum retries. Routing to Dead-Letter Queue (ingestion-dlq)...`);
         try {
           await dlqQueue.add('dlq_failed_ingestion', job.data, {
             jobId: `dlq_${job.id}`,
@@ -175,7 +182,7 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
             error: `Max retries exhausted: ${err.message}`,
           });
         } catch (dlqErr: any) {
-          console.error('[IngestionWorker Error] Failed to push to DLQ:', dlqErr.message);
+          logger.error('[IngestionWorker Error] Failed to push to DLQ:', dlqErr.message);
         }
       } else {
         await logJobLifecycle({
@@ -193,24 +200,39 @@ export function createIngestionWorker(): Worker<IngestionJobData> {
     if ((err as any).code === 'ECONNREFUSED') {
       // Suppress offline Redis dev message
     } else {
-      console.error('[IngestionWorker Error]:', err);
+      logger.error('[IngestionWorker Error]:', err);
     }
   });
 
   return worker;
 }
 
+export function isIngestionWorkerRunning(): boolean {
+  return workerInstance !== null && workerInstance.isRunning();
+}
+
 export function startIngestionWorker(): Worker<IngestionJobData> {
   if (!workerInstance) {
-    console.log('[IngestionWorker] Starting BullMQ Ingestion Worker (Concurrency: 5, Rate Limiter: 100/min)...');
+    logger.info('[IngestionWorker] Starting BullMQ Ingestion Worker (Concurrency: 5, Rate Limiter: 100/min)...');
     workerInstance = createIngestionWorker();
   }
+  const healthPort = parseInt(process.env.INGESTION_WORKER_HEALTH_PORT || '5004', 10);
+  startHealthServer('ingestion-worker', healthPort, {
+    checks: {
+      redis: () => checkRedis(),
+      supabase: () => checkSupabase(),
+    },
+    details: async () => {
+      const queue = await checkBullMQQueueCounts(ingestionQueue);
+      return { workerRunning: isIngestionWorkerRunning(), queue: queue || 'unknown' };
+    },
+  });
   return workerInstance;
 }
 
 export async function stopIngestionWorker(): Promise<void> {
   if (workerInstance) {
-    console.log('[IngestionWorker] Stopping BullMQ Ingestion Worker...');
+    logger.info('[IngestionWorker] Stopping BullMQ Ingestion Worker...');
     await workerInstance.close();
     workerInstance = null;
   }

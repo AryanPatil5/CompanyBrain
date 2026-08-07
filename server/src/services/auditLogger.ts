@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { supabase } from '../config/supabase.js';
 
 export interface AuditEvent {
@@ -29,7 +30,7 @@ export function logAuditEvent(event: Omit<AuditEvent, 'eventId' | 'timestamp'>):
   };
 
   // 1. SIEM Structured JSON Output to stdout
-  console.log(`[AUDIT_STREAM] ${JSON.stringify(fullEvent)}`);
+  logger.info(`[AUDIT_STREAM] ${JSON.stringify(fullEvent)}`);
 
   // 2. Asynchronous Database Persistence to audit_logs / execution_logs table
   void (async () => {
@@ -44,7 +45,7 @@ export function logAuditEvent(event: Omit<AuditEvent, 'eventId' | 'timestamp'>):
         executed_at: fullEvent.timestamp,
       });
     } catch (dbErr) {
-      console.warn('[AuditLogger Warning] Failed to write audit log to database:', dbErr);
+      logger.warn('[AuditLogger Warning] Failed to write audit log to database:', dbErr);
     }
   })();
 

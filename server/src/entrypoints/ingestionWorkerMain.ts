@@ -1,17 +1,4 @@
-import dotenv from 'dotenv';
-import { startIngestionWorker, stopIngestionWorker } from '../workers/ingestionWorker.js';
-import { startTemporalWorker, stopTemporalWorker } from '../workers/temporalWorker.js';
+// ingestion-worker entrypoint — starts only the BullMQ ingestion worker process
+import { bootstrap } from '../bootstrap.js';
 
-dotenv.config();
-
-startIngestionWorker();
-startTemporalWorker();
-
-const shutdown = async () => {
-  console.log('[INFO] Gracefully shutting down Ingestion/Temporal workers...');
-  await stopIngestionWorker();
-  await stopTemporalWorker();
-  process.exit(0);
-};
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+bootstrap(['ingestion-worker']);

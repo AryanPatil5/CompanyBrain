@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../config/supabase.js';
 import { crawlSlackHistory, isSOPCandidateSlackThread, processSlackThreadCandidates, type SlackThread } from './crawlers/slack.js';
@@ -7,6 +8,15 @@ import { crawlEmailInbox } from './crawlers/email.js';
 import { crawlDatabaseLogs } from './crawlers/database.js';
 import { crawlZendeskTickets } from './crawlers/zendesk.js';
 import { markStaleSOPs } from './freshness.js';
+import {
+  checkBullMQQueueCounts,
+  checkRedis,
+  checkSupabase,
+  getProcessStats,
+  setProcessStat,
+  startHealthServer,
+} from './health.js';
+import { ingestionQueue } from '../queue/ingestionQueue.js';
 
 dotenv.config();
 
@@ -24,13 +34,15 @@ export {
 
 let crawlerTimer: NodeJS.Timeout | null = null;
 const CRAWL_INTERVAL_MS = parseInt(process.env.CRAWL_INTERVAL_MS || '3600000', 10); // Default: every 1 hour (3600000ms)
+let crawlComplete = false;
 
 /**
  * Executes a single complete crawler cycle across all active historical sources per workspace & staleness sweep.
  */
 export async function runCrawlCycle(): Promise<void> {
-  console.log('[INFO] [Crawler Worker] Running background historical knowledge crawl cycle across Slack, GitHub, Linear, Zendesk, Email & Database...');
+  logger.info('[INFO] [Crawler Worker] Running background historical knowledge crawl cycle across Slack, GitHub, Linear, Zendesk, Email & Database...');
   try {
+    crawlComplete = false;
     const slackRes = await crawlSlackHistory();
     const githubRes = await crawlGithubPostMortems();
     const linearRes = await crawlLinearIncidents();
@@ -60,7 +72,7 @@ export async function runCrawlCycle(): Promise<void> {
     // Perform background knowledge freshness & staleness sweep (30-day threshold)
     const staleCount = await markStaleSOPs(30);
 
-    console.log('[INFO] [Crawler Worker] Background crawl cycle & staleness sweep complete:', {
+    logger.info('[INFO] [Crawler Worker] Background crawl cycle & staleness sweep complete:', {
       slack: slackRes.status,
       github: githubRes.status,
       linear: linearRes.status,
@@ -69,9 +81,26 @@ export async function runCrawlCycle(): Promise<void> {
       database: dbRes.status,
       stale_sops_marked: staleCount,
     });
+    crawlComplete = true;
   } catch (err) {
-    console.error('[ERROR] [Crawler Worker] Failures during crawl cycle:', err);
+    logger.error('[ERROR] [Crawler Worker] Failures during crawl cycle:', err);
+  } finally {
+    setProcessStat('crawler', 'lastCrawlAt', new Date().toISOString());
+    setProcessStat('crawler', 'lastCrawlOk', crawlComplete);
   }
+}
+
+/**
+ * Runtime crawler status for the health endpoint: worker alive, last crawl
+ * timestamp, next scheduled crawl (derived from the fixed interval).
+ */
+export function getCrawlerStatus(): { running: boolean; lastCrawlAt: string | null; nextCrawlAt: string | null; intervalMs: number } {
+  const stats = getProcessStats('crawler');
+  const lastCrawlAt = (stats.lastCrawlAt as string) || null;
+  const nextCrawlAt = lastCrawlAt
+    ? new Date(new Date(lastCrawlAt).getTime() + CRAWL_INTERVAL_MS).toISOString()
+    : null;
+  return { running: crawlerTimer !== null, lastCrawlAt, nextCrawlAt, intervalMs: CRAWL_INTERVAL_MS };
 }
 
 /**
@@ -79,7 +108,19 @@ export async function runCrawlCycle(): Promise<void> {
  */
 export function startCrawlerWorker(): void {
   if (crawlerTimer) return;
-  console.log(`[INFO] [Crawler Worker] Initializing active crawler worker (Recurring interval: ${CRAWL_INTERVAL_MS}ms)...`);
+  logger.info(`[INFO] [Crawler Worker] Initializing active crawler worker (Recurring interval: ${CRAWL_INTERVAL_MS}ms)...`);
+
+  const healthPort = parseInt(process.env.CRAWLER_PORT || '5002', 10);
+  startHealthServer('crawler', healthPort, {
+    checks: {
+      redis: () => checkRedis(),
+      supabase: () => checkSupabase(),
+    },
+    details: async () => {
+      const queue = await checkBullMQQueueCounts(ingestionQueue);
+      return { ...getCrawlerStatus(), queue: queue || 'unknown' };
+    },
+  });
 
   void runCrawlCycle();
 
@@ -95,6 +136,6 @@ export function stopCrawlerWorker(): void {
   if (crawlerTimer) {
     clearInterval(crawlerTimer);
     crawlerTimer = null;
-    console.log('[INFO] [Crawler Worker] Background crawler worker stopped.');
+    logger.info('[INFO] [Crawler Worker] Background crawler worker stopped.');
   }
 }

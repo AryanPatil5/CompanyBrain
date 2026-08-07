@@ -1,8 +1,9 @@
+import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
 import { extractSOPFromThread } from '../extractor.js';
 import { createVersion } from '../freshness.js';
-import { generateEmbedding } from '../embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
 
 dotenv.config();
 
@@ -42,7 +43,7 @@ async function markDatabaseRoutineCrawled(routineId: string, targetDb: string): 
       target: targetDb,
     });
   } catch (err) {
-    console.warn('[Database Crawler] Failed to record deduplication entry:', err);
+    logger.warn('[Database Crawler] Failed to record deduplication entry:', err);
   }
 }
 
@@ -53,7 +54,7 @@ export async function crawlDatabaseLogs(
   targetDb: string = process.env.DATABASE_SCAN_TARGET || 'postgres_primary',
   workspaceId: string = '00000000-0000-0000-0000-000000000000'
 ): Promise<DatabaseCrawlResult> {
-  console.log(`[INFO] [Database Crawler] Scanning database schema and query runbooks for: ${targetDb}...`);
+  logger.info(`[INFO] [Database Crawler] Scanning database schema and query runbooks for: ${targetDb}...`);
 
   let sopsExtracted = 0;
   let queriesCrawled = 0;
@@ -88,7 +89,18 @@ export async function crawlDatabaseLogs(
         const extractedSOP = await extractSOPFromThread(dbTranscript, workspaceId, 'database');
 
         if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
-          const sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          let sopEmbedding: number[] | null = null;
+          try {
+            sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
+          } catch (embErr) {
+            await recordEmbeddingFailure({
+              workspaceId,
+              source: 'database',
+              rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
+              error: embErr,
+            });
+            throw embErr;
+          }
 
           const insertPayload: Record<string, any> = {
             workspace_id: workspaceId,
@@ -116,11 +128,12 @@ export async function crawlDatabaseLogs(
           if (!insertErr && sopData) {
             await createVersion(sopData.id, 'database_crawler', 'initial_extraction');
             sopsExtracted++;
-            console.log(`[SUCCESS] [Database Crawler] Extracted SOP "${sopData.title}" from DB Routine ${routine.name}`);
+            logger.info(`[SUCCESS] [Database Crawler] Extracted SOP "${sopData.title}" from DB Routine ${routine.name}`);
           }
         }
       } catch (extractErr) {
-        console.warn(`[WARN] [Database Crawler] Extraction skipped for DB routine ${routine.name}:`, (extractErr as Error).message);
+        if (extractErr instanceof EmbeddingError) throw extractErr;
+        logger.warn(`[WARN] [Database Crawler] Extraction skipped for DB routine ${routine.name}:`, (extractErr as Error).message);
       }
 
       await markDatabaseRoutineCrawled(routine.id, targetDb);
@@ -128,7 +141,7 @@ export async function crawlDatabaseLogs(
 
     return { source: 'database', target_db: targetDb, queries_crawled: queriesCrawled, sops_extracted: sopsExtracted, status: 'success' };
   } catch (err) {
-    console.error('[ERROR] [Database Crawler] Error during crawl execution:', err);
+    logger.error('[ERROR] [Database Crawler] Error during crawl execution:', err);
     return { source: 'database', target_db: targetDb, queries_crawled: queriesCrawled, sops_extracted: sopsExtracted, status: 'error' };
   }
 }

@@ -1,0 +1,65 @@
+{{- if .Values.infra.vault.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "company-brain.component" (merge (dict "suffix" "vault") .) }}
+  labels:
+    app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "vault") .) }}
+    app.kubernetes.io/component: infra
+spec:
+  replicas: {{ .Values.infra.vault.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "vault") .) }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "vault") .) }}
+        app.kubernetes.io/component: infra
+    spec:
+      containers:
+        - name: vault
+          image: "{{ .Values.infra.vault.image.repository }}:{{ .Values.infra.vault.image.tag }}"
+          imagePullPolicy: {{ .Values.infra.vault.image.pullPolicy }}
+          command: ["sh", "-c", "vault server -dev -dev-root-token-id={{ .Values.infra.vault.devRootToken }}"]
+          ports:
+            - name: http
+              containerPort: {{ .Values.infra.vault.service.port }}
+              protocol: TCP
+          env:
+            - name: VAULT_ADDR
+              value: "http://127.0.0.1:{{ .Values.infra.vault.service.port }}"
+          livenessProbe:
+            exec:
+              command: ["vault", "status"]
+            initialDelaySeconds: {{ .Values.infra.vault.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.vault.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.vault.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.vault.probes.failureThreshold }}
+          readinessProbe:
+            exec:
+              command: ["vault", "status"]
+            initialDelaySeconds: {{ .Values.infra.vault.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.vault.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.vault.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.vault.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.infra.vault.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "company-brain.component" (merge (dict "suffix" "vault") .) }}
+  labels:
+    app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "vault") .) }}
+    app.kubernetes.io/component: infra
+spec:
+  type: {{ .Values.infra.vault.service.type }}
+  ports:
+    - port: {{ .Values.infra.vault.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: {{ include "company-brain.component" (merge (dict "suffix" "vault") .) }}
+{{- end }}

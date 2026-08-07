@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { Response, NextFunction } from 'express';
 import * as jose from 'jose';
 import { AuthenticatedRequest } from './auth.js';
@@ -21,7 +22,7 @@ if (process.env.JWKS_URI) {
       cacheMaxAge: 3600000, // 1 hour in-memory cache TTL
     });
   } catch (err) {
-    console.warn('[JWKS Warning] Failed to initialize remote JWK set:', err);
+    logger.warn('[JWKS Warning] Failed to initialize remote JWK set:', err);
   }
 }
 

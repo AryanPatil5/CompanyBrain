@@ -1,5 +1,18 @@
 import { useEffect, useState } from "react";
-import { X, ShieldCheck, AlertTriangle, History, Clock, ChevronDown, ChevronUp, ShieldAlert, Sparkles, RefreshCw, HelpCircle, AlertCircle } from "lucide-react";
+import {
+  X,
+  ShieldCheck,
+  AlertTriangle,
+  History,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  ShieldAlert,
+  Sparkles,
+  RefreshCw,
+  HelpCircle,
+  AlertCircle,
+} from "lucide-react";
 import type { Sop, SopVersion, RiskLevel } from "@/lib/sops";
 import { fetchVersions, elicitSopQuestionsApi } from "@/lib/sops";
 import { StatusPill } from "./SopCard";
@@ -75,7 +88,7 @@ export function SopInspector({
     } else {
       setInterviewError(
         res.error ||
-          "Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually."
+          "Unable to generate interview questions for this SOP draft. Please try again or fill in the missing fields manually.",
       );
     }
   };
@@ -98,10 +111,14 @@ export function SopInspector({
         <header className="flex items-start justify-between gap-4 border-b border-black/[0.06] p-6">
           <div className="space-y-2.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-2xl border px-2.5 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-xl ${CATEGORY_TINT[sop.category] ?? "text-indigo-800 border-indigo-200 bg-indigo-50"}`}>
+              <span
+                className={`rounded-2xl border px-2.5 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-xl ${CATEGORY_TINT[sop.category] ?? "text-indigo-800 border-indigo-200 bg-indigo-50"}`}
+              >
                 {sop.category}
               </span>
-              <span className={`flex items-center gap-1 rounded-2xl border px-2.5 py-1 text-[11px] font-semibold uppercase ${RISK_TINT[sop.riskLevel || "Low"]}`}>
+              <span
+                className={`flex items-center gap-1 rounded-2xl border px-2.5 py-1 text-[11px] font-semibold uppercase ${RISK_TINT[sop.riskLevel || "Low"]}`}
+              >
                 {sop.requiresHumanGate && <ShieldAlert className="h-3 w-3" />}
                 {sop.riskLevel || "Low"} Risk
               </span>
@@ -114,12 +131,13 @@ export function SopInspector({
               )}
               {sop.version > 1 && (
                 <span className="flex items-center gap-1 rounded-2xl border border-black/[0.08] bg-black/[0.03] px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                  <History className="h-2.5 w-2.5" />
-                  v{sop.version}
+                  <History className="h-2.5 w-2.5" />v{sop.version}
                 </span>
               )}
             </div>
-            <h2 className="text-[21px] leading-snug font-semibold text-[#1d1d1f]">{sop.title}</h2>
+            <h2 className="text-[21px] leading-snug font-semibold text-[#1d1d1f]">
+              {sop.title}
+            </h2>
             <code className="block font-mono text-[12px] font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-2xl p-2.5">
               {sop.trigger}
             </code>
@@ -136,8 +154,12 @@ export function SopInspector({
 
         <div className="flex-1 space-y-6 overflow-y-auto p-6">
           <div className="space-y-2">
-            <h3 className="text-[11px] font-semibold text-[#6e6e73] uppercase">Summary</h3>
-            <p className="text-[13.5px] leading-relaxed text-[#1d1d1f]">{sop.summary}</p>
+            <h3 className="text-[11px] font-semibold text-[#6e6e73] uppercase">
+              Summary
+            </h3>
+            <p className="text-[13.5px] leading-relaxed text-[#1d1d1f]">
+              {sop.summary}
+            </p>
           </div>
 
           {/* Interactive Elicitation Section */}
@@ -145,7 +167,9 @@ export function SopInspector({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-[#0071e3]" />
-                <span className="text-[13px] font-semibold text-[#1d1d1f]">AI Elicitation Interview</span>
+                <span className="text-[13px] font-semibold text-[#1d1d1f]">
+                  AI Elicitation Interview
+                </span>
               </div>
               <button
                 type="button"
@@ -193,7 +217,10 @@ export function SopInspector({
                 </p>
                 <div className="space-y-2">
                   {interviewQuestions.map((q, idx) => (
-                    <div key={idx} className="flex items-start gap-2.5 rounded-xl border border-black/10 bg-white/90 p-3 text-[12.5px] text-[#1d1d1f] shadow-sm">
+                    <div
+                      key={idx}
+                      className="flex items-start gap-2.5 rounded-xl border border-black/10 bg-white/90 p-3 text-[12.5px] text-[#1d1d1f] shadow-sm"
+                    >
                       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0071e3] text-white text-[10px] font-bold">
                         {idx + 1}
                       </span>
@@ -206,7 +233,9 @@ export function SopInspector({
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-[11px] font-semibold text-[#6e6e73] uppercase">Execution Steps ({sop.steps.length})</h3>
+            <h3 className="text-[11px] font-semibold text-[#6e6e73] uppercase">
+              Execution Steps ({sop.steps.length})
+            </h3>
             <div className="space-y-2.5">
               {sop.steps.map((step, idx) => (
                 <div
@@ -217,7 +246,9 @@ export function SopInspector({
                     {idx + 1}
                   </span>
                   <div className="min-w-0 flex-1 space-y-1">
-                    <p className="text-[13px] font-medium text-[#1d1d1f]">{step.instruction}</p>
+                    <p className="text-[13px] font-medium text-[#1d1d1f]">
+                      {step.instruction}
+                    </p>
                     <span className="inline-block rounded-2xl border border-black/[0.06] bg-black/[0.03] px-2 py-0.5 font-mono text-[10.5px] font-semibold text-[#6e6e73]">
                       Target: {step.target}
                     </span>
@@ -236,12 +267,19 @@ export function SopInspector({
               >
                 <History className="h-3.5 w-3.5" />
                 Version Audit History ({versions.length})
-                {showVersions ? <ChevronUp className="ml-auto h-3 w-3" /> : <ChevronDown className="ml-auto h-3 w-3" />}
+                {showVersions ? (
+                  <ChevronUp className="ml-auto h-3 w-3" />
+                ) : (
+                  <ChevronDown className="ml-auto h-3 w-3" />
+                )}
               </button>
               {showVersions && (
                 <div className="mt-2 space-y-1.5 pl-2">
                   {versions.map((v) => (
-                    <div key={v.id} className="flex items-center gap-3 rounded-2xl border border-black/[0.06] bg-white/50 px-3 py-2">
+                    <div
+                      key={v.id}
+                      className="flex items-center gap-3 rounded-2xl border border-black/[0.06] bg-white/50 px-3 py-2"
+                    >
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-2xl border border-black/[0.08] bg-white font-mono text-[10px] font-semibold text-[#1d1d1f]">
                         {v.version_number}
                       </span>
@@ -251,7 +289,8 @@ export function SopInspector({
                         </p>
                         <p className="flex items-center gap-1.5 text-[10px] text-[#6e6e73]">
                           <Clock className="h-2.5 w-2.5" />
-                          {new Date(v.created_at).toLocaleString()} · {v.changed_by}
+                          {new Date(v.created_at).toLocaleString()} ·{" "}
+                          {v.changed_by}
                         </p>
                       </div>
                     </div>

@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 /**
  * Rate Limiter & Exponential Backoff Utility for BullMQ Ingestion Queues
  * Parses HTTP 429 Retry-After headers and calculates exponential delay windows.
@@ -31,7 +32,7 @@ export async function handleRateLimitResponse(
 ): Promise<number> {
   const retryAfterMs = parseRetryAfterHeader(retryAfterHeader);
   const delayMs = retryAfterMs !== null ? retryAfterMs : calculateExponentialBackoff(attempt);
-  console.log(`[RateLimiter] HTTP 429 Rate Limit Encountered. Pausing execution for ${delayMs}ms (Attempt #${attempt})...`);
+  logger.info(`[RateLimiter] HTTP 429 Rate Limit Encountered. Pausing execution for ${delayMs}ms (Attempt #${attempt})...`);
   await sleep(delayMs);
   return delayMs;
 }

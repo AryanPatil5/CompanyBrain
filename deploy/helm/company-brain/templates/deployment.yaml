@@ -1,19 +1,20 @@
+{{- $name := include "company-brain.component" (merge (dict "suffix" "api") .) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "company-brain.fullname" . }}-api
+  name: {{ $name }}
   labels:
-    app.kubernetes.io/name: company-brain-api
+    app.kubernetes.io/name: {{ $name }}
     app.kubernetes.io/component: api-gateway
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: company-brain-api
+      app.kubernetes.io/name: {{ $name }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: company-brain-api
+        app.kubernetes.io/name: {{ $name }}
     spec:
       containers:
         - name: api-server

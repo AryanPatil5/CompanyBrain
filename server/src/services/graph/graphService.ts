@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { supabase } from '../../config/supabase.js';
 import { validateTriple, type GraphTriple } from './ontologyCompiler.js';
 import { disambiguateTriple } from './entityDisambiguator.js';
@@ -34,26 +35,6 @@ export interface ConnectedEntityResult {
 }
 
 /**
- * Parameterized Cypher query execution helper enforcing parameterized inputs and DLAC WHERE clause filters.
- */
-export async function executeCypher(cypherQuery: string, params?: Record<string, any>): Promise<any[]> {
-  try {
-    const { data, error } = await supabase.rpc('execute_cypher_query', {
-      query: cypherQuery,
-      params: params || {},
-    });
-
-    if (!error && Array.isArray(data)) {
-      return data;
-    }
-  } catch (err) {
-    // Cypher RPC fallback
-  }
-
-  return [];
-}
-
-/**
  * Adds an entity node to the graph with DLAC allowed_roles and source_document_id metadata.
  */
 export async function addEntityNode(
@@ -87,7 +68,7 @@ export async function addEntityNode(
       source_document_id: node.source_document_id,
     });
   } catch (err) {
-    console.warn('[GraphService Warning] Failed to write graph node to database:', err);
+    logger.warn('[GraphService Warning] Failed to write graph node to database:', err);
   }
 
   return node;
@@ -130,7 +111,7 @@ export async function createRelationship(
       { onConflict: 'source_id, target_id, edge_type' }
     );
   } catch (err) {
-    console.warn('[GraphService Warning] Failed to write graph edge to database:', err);
+    logger.warn('[GraphService Warning] Failed to write graph edge to database:', err);
   }
 
   return edge;
@@ -187,6 +168,8 @@ export async function persistGraphTriples(
 /**
  * Executes a DLAC-permissioned 1-hop or 2-hop graph traversal starting from entityId.
  * Hides restricted nodes/relationships from unauthorized roles.
+ * Every node/edge query is filtered by workspace_id; traversals without an explicit
+ * workspace fail closed to prevent cross-workspace leakage.
  */
 export async function getConnectedEntities(
   entityId: string,
@@ -197,6 +180,12 @@ export async function getConnectedEntities(
   const visited = new Set<string>();
   visited.add(entityId);
 
+  const workspaceId = options?.workspaceId;
+  if (!workspaceId) {
+    logger.warn('[GraphService Warning] getConnectedEntities called without workspace_id; returning empty results (fail closed).');
+    return results;
+  }
+
   const userRole = options?.userRole || 'member';
   const isAdmin = userRole === 'admin';
 
@@ -204,6 +193,7 @@ export async function getConnectedEntities(
     const { data: edges1 } = await supabase
       .from('graph_edges')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .or(`source_id.eq.${entityId},target_id.eq.${entityId}`);
 
     if (Array.isArray(edges1) && edges1.length > 0) {
@@ -217,6 +207,7 @@ export async function getConnectedEntities(
       const { data: nodes1 } = await supabase
         .from('graph_nodes')
         .select('*')
+        .eq('workspace_id', workspaceId)
         .in('id', hop1TargetIds);
 
       // DLAC Filter Nodes based on allowed_roles
@@ -244,6 +235,7 @@ export async function getConnectedEntities(
         const { data: edges2 } = await supabase
           .from('graph_edges')
           .select('*')
+          .eq('workspace_id', workspaceId)
           .in('source_id', hop1TargetIds);
 
         if (Array.isArray(edges2) && edges2.length > 0) {
@@ -257,6 +249,7 @@ export async function getConnectedEntities(
             const { data: nodes2 } = await supabase
               .from('graph_nodes')
               .select('*')
+              .eq('workspace_id', workspaceId)
               .in('id', hop2TargetIds);
 
             const permittedNodes2 = (nodes2 || []).filter(
@@ -281,17 +274,27 @@ export async function getConnectedEntities(
       }
     }
   } catch (err) {
-    console.warn('[GraphService Warning] Exception during getConnectedEntities traversal:', err);
+    logger.warn('[GraphService Warning] Exception during getConnectedEntities traversal:', err);
   }
 
   return results;
 }
 
+/**
+ * Merges a duplicate graph node into its canonical node, re-pointing incoming/outgoing edges.
+ * Every query is filtered by workspace_id; merging without an explicit workspace fails closed.
+ */
 export async function mergeGraphNodes(
   sourceNodeId: string,
-  targetNodeId: string
+  targetNodeId: string,
+  workspaceId?: string
 ): Promise<{ mergedEdgesCount: number; success: boolean }> {
   if (!sourceNodeId || !targetNodeId || sourceNodeId === targetNodeId) {
+    return { mergedEdgesCount: 0, success: false };
+  }
+
+  if (!workspaceId) {
+    logger.warn('[GraphService Warning] mergeGraphNodes called without workspace_id; refusing to merge (fail closed).');
     return { mergedEdgesCount: 0, success: false };
   }
 
@@ -300,33 +303,41 @@ export async function mergeGraphNodes(
     const { data: outgoingEdges } = await supabase
       .from('graph_edges')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('source_id', sourceNodeId);
 
     if (Array.isArray(outgoingEdges)) {
       for (const edge of outgoingEdges) {
-        await createRelationship(targetNodeId, edge.target_id, edge.edge_type, edge.properties || {});
+        await createRelationship(targetNodeId, edge.target_id, edge.edge_type, {
+          ...(edge.properties || {}),
+          workspace_id: workspaceId,
+        });
         mergedEdgesCount++;
       }
-      await supabase.from('graph_edges').delete().eq('source_id', sourceNodeId);
+      await supabase.from('graph_edges').delete().eq('workspace_id', workspaceId).eq('source_id', sourceNodeId);
     }
 
     const { data: incomingEdges } = await supabase
       .from('graph_edges')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('target_id', sourceNodeId);
 
     if (Array.isArray(incomingEdges)) {
       for (const edge of incomingEdges) {
-        await createRelationship(edge.source_id, targetNodeId, edge.edge_type, edge.properties || {});
+        await createRelationship(edge.source_id, targetNodeId, edge.edge_type, {
+          ...(edge.properties || {}),
+          workspace_id: workspaceId,
+        });
         mergedEdgesCount++;
       }
-      await supabase.from('graph_edges').delete().eq('target_id', sourceNodeId);
+      await supabase.from('graph_edges').delete().eq('workspace_id', workspaceId).eq('target_id', sourceNodeId);
     }
 
-    await supabase.from('graph_nodes').delete().eq('id', sourceNodeId);
+    await supabase.from('graph_nodes').delete().eq('workspace_id', workspaceId).eq('id', sourceNodeId);
     return { mergedEdgesCount, success: true };
   } catch (err) {
-    console.warn('[GraphService Warning] Failed to merge graph nodes:', err);
+    logger.warn('[GraphService Warning] Failed to merge graph nodes:', err);
     return { mergedEdgesCount, success: false };
   }
 }

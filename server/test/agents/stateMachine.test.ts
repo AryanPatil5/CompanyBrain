@@ -1,4 +1,4 @@
-import { transitionState, type WorkflowStatus } from '../../src/agents/stateMachine.js';
+import { transitionState } from '../../src/agents/stateMachine.js';
 
 export async function runStateMachineTest(): Promise<boolean> {
   console.log('\n=================================================');

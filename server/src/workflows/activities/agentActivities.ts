@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { generatePlan } from '../../agents/planner.js';
 import { auditPlan } from '../../agents/auditor.js';
 import { executePlan } from '../../agents/executor.js';
@@ -13,7 +14,7 @@ export async function planStepActivity(
   const startTime = Date.now();
 
   try {
-    console.log(`[Temporal Activity] Executing Planning for query: "${userQuery}"...`);
+    logger.info(`[Temporal Activity] Executing Planning for query: "${userQuery}"...`);
     const plan = await generatePlan(userQuery, context);
 
     const duration = Date.now() - startTime;
@@ -36,7 +37,7 @@ export async function researchStepActivity(
   const startTime = Date.now();
 
   try {
-    console.log(`[Temporal Activity] Executing Hybrid Research Activity for: "${query}"...`);
+    logger.info(`[Temporal Activity] Executing Hybrid Research Activity for: "${query}"...`);
     const results = await hybridSearch({
       query,
       workspaceId,
@@ -63,7 +64,7 @@ export async function auditStepActivity(
   const startTime = Date.now();
 
   try {
-    console.log(`[Temporal Activity] Executing Audit Activity for plan #${plan.id}...`);
+    logger.info(`[Temporal Activity] Executing Audit Activity for plan #${plan.id}...`);
     const audit = await auditPlan(plan, context);
 
     const duration = Date.now() - startTime;
@@ -86,7 +87,7 @@ export async function executeStepActivity(
   const startTime = Date.now();
 
   try {
-    console.log(`[Temporal Activity] Executing Plan Execution Activity for plan #${plan.id}...`);
+    logger.info(`[Temporal Activity] Executing Plan Execution Activity for plan #${plan.id}...`);
     const results = await executePlan(plan, context);
 
     const duration = Date.now() - startTime;

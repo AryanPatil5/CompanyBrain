@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { Queue, type QueueOptions } from 'bullmq';
 import { Redis } from 'ioredis';
 import dotenv from 'dotenv';
@@ -14,9 +15,9 @@ export const redisConnection = new Redis(REDIS_URL, {
 
 redisConnection.on('error', (err) => {
   if ((err as any).code === 'ECONNREFUSED') {
-    console.warn(`[IngestionQueue Warning] Redis connection refused at ${REDIS_URL}. Ensure Redis server is running.`);
+    logger.warn(`[IngestionQueue Warning] Redis connection refused at ${REDIS_URL}. Ensure Redis server is running.`);
   } else {
-    console.error('[IngestionQueue Redis Error]:', err);
+    logger.error('[IngestionQueue Redis Error]:', err);
   }
 });
 

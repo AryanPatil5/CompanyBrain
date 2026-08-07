@@ -1,27 +1,10 @@
 -- ==========================================================
--- Company Brain: Apache AGE Graph Extension & Schema Initialization
+-- Company Brain: Relational Knowledge Graph Schema
+-- (Apache AGE removed in Phase 0 Task 3 — see 030_retire_apache_age.sql)
 -- Run this in Supabase / PostgreSQL SQL Editor
 -- ==========================================================
 
--- 1. Enable Apache AGE extension if available
-create extension if not exists age;
-
--- Set search_path to include ag_catalog
-set search_path = ag_catalog, "$user", public;
-
--- 2. Initialize Graph Namespace "company_knowledge_graph"
-do $$
-begin
-  if not exists (select 1 from ag_catalog.ag_graph where name = 'company_knowledge_graph') then
-    perform ag_catalog.create_graph('company_knowledge_graph');
-  end if;
-exception
-  when undefined_function then
-    -- Extension age not installed in standard postgres instance; create relational fallback tables below
-    null;
-end $$;
-
--- 3. Relational Fallback Tables for Apache AGE Nodes & Edges (for non-AGE postgres runtime)
+-- Relational Graph Tables (system of record; ADR-T4)
 create table if not exists public.graph_nodes (
   id text primary key,
   label text not null check (label in ('Person', 'System', 'SOP', 'Rule', 'Step', 'Entity', 'Policy', 'Team', 'Role')),

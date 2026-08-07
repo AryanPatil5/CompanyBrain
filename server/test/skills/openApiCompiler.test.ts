@@ -1,4 +1,4 @@
-import { compileOpenApiSpec, CompiledSkill } from '../../src/services/skills/openApiCompiler.js';
+import { compileOpenApiSpec } from '../../src/services/skills/openApiCompiler.js';
 
 export async function runOpenApiCompilerTest(): Promise<boolean> {
   console.log('\n=================================================');

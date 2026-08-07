@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { supabase } from '../config/supabase.js';
 
 /**
@@ -10,7 +11,7 @@ export async function provisionUser(
   workspaceId: string = '00000000-0000-0000-0000-000000000000',
   role: 'admin' | 'approver' | 'member' = 'admin'
 ) {
-  console.log(`[Provisioning] Creating user ${email} in workspace ${workspaceId} with role ${role}...`);
+  logger.info(`[Provisioning] Creating user ${email} in workspace ${workspaceId} with role ${role}...`);
 
   const userPassword = password || `TempPass_${Math.random().toString(36).slice(2)}!9`;
 
@@ -21,7 +22,7 @@ export async function provisionUser(
   });
 
   if (authErr || !authData?.user) {
-    console.error('[Provisioning Error] Failed to create auth user:', authErr);
+    logger.error('[Provisioning Error] Failed to create auth user:', authErr);
     return null;
   }
 
@@ -39,11 +40,11 @@ export async function provisionUser(
     .single();
 
   if (roleErr) {
-    console.error('[Provisioning Error] Failed to assign workspace role:', roleErr);
+    logger.error('[Provisioning Error] Failed to assign workspace role:', roleErr);
     return null;
   }
 
-  console.log(`[Provisioning Success] Provisioned user ID ${userId} with temporary password: ${userPassword}`);
+  logger.info(`[Provisioning Success] Provisioned user ID ${userId} with temporary password: ${userPassword}`);
   return { user: authData.user, roleMapping: roleData };
 }
 

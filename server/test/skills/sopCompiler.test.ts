@@ -39,7 +39,6 @@ Steps:
     const ast = await compileSopToAst(sampleMarkdown);
 
     const hasApprovalGate = ast.steps.some((s) => s.requiresHumanApproval);
-    const hasStripeTarget = ast.steps.some((s) => s.targetSystem === 'Stripe');
 
     if (!hasApprovalGate) {
       console.error('❌ SOP COMPILER TEST FAILED: High refund step was not flagged for human approval!', ast.steps);

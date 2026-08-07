@@ -62,7 +62,7 @@ export async function runVectorEntityResolverTest(): Promise<boolean> {
     await createRelationship(sourceId, neighborId, 'REQUIRES');
 
     // Execute node merge: sourceId -> targetId
-    const mergeRes = await mergeGraphNodes(sourceId, targetId);
+    const mergeRes = await mergeGraphNodes(sourceId, targetId, workspaceId);
 
     if (!mergeRes.success) {
       console.error('❌ VECTOR RESOLVER TEST FAILED: mergeGraphNodes returned failure state!', mergeRes);
@@ -70,7 +70,7 @@ export async function runVectorEntityResolverTest(): Promise<boolean> {
     }
 
     // Verify neighbor SOP is now connected to targetId (Canonical System)
-    const connected = await getConnectedEntities(targetId, 1);
+    const connected = await getConnectedEntities(targetId, 1, { workspaceId });
     const hasReconnectedEdge = connected.some((c) => c.entityId === neighborId && c.relationship === 'REQUIRES');
 
     if (!hasReconnectedEdge) {

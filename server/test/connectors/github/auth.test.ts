@@ -1,8 +1,8 @@
 // Unit tests: GitHub App JWT creation, installation token exchange, caching.
 // Pure tests: no Redis / Supabase / network — fetch is injected.
 
-import { generateKeyPairSync, createSign } from 'node:crypto';
-import { importPKCS8, importSPKI, jwtVerify } from 'jose';
+import { generateKeyPairSync } from 'node:crypto';
+import { importSPKI, jwtVerify } from 'jose';
 import { GitHubAppAuth, GitHubAuthError } from '../../../src/connectors/github/auth.js';
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {

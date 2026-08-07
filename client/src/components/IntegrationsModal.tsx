@@ -1,5 +1,15 @@
 import { useState, useEffect } from "react";
-import { X, Plug, CheckCircle2, ShieldCheck, ExternalLink, Trash2, AlertCircle, Settings, Sparkles } from "lucide-react";
+import {
+  X,
+  Plug,
+  CheckCircle2,
+  ShieldCheck,
+  ExternalLink,
+  Trash2,
+  AlertCircle,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 import { OAuthSetupWizard } from "./OAuthSetupWizard";
 import { API_BASE_URL } from "../lib/api-config";
 
@@ -24,7 +34,9 @@ export function IntegrationsModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardProvider, setWizardProvider] = useState<"slack" | "github" | "gmail">("slack");
+  const [wizardProvider, setWizardProvider] = useState<
+    "slack" | "github" | "gmail"
+  >("slack");
 
   const fetchStatuses = async () => {
     setLoading(true);
@@ -62,14 +74,17 @@ export function IntegrationsModal({
       setError(null);
       const token = localStorage.getItem("token") || "mock-admin-token";
 
-      const res = await fetch(`${API_BASE_URL}/api/integrations/${provider}/connect-url`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
+      const res = await fetch(
+        `${API_BASE_URL}/api/integrations/${provider}/connect-url`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
         },
-      });
+      );
 
       if (!res.ok) {
         const errData = await res.json();
@@ -90,14 +105,17 @@ export function IntegrationsModal({
   const handleDisconnect = async (provider: string) => {
     try {
       const token = localStorage.getItem("token") || "mock-admin-token";
-      const res = await fetch(`${API_BASE_URL}/api/integrations/${provider}/disconnect`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
+      const res = await fetch(
+        `${API_BASE_URL}/api/integrations/${provider}/disconnect`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
         },
-      });
+      );
 
       if (res.ok) {
         fetchStatuses();
@@ -121,7 +139,8 @@ export function IntegrationsModal({
       provider: "slack",
       name: "Slack",
       type: "OAuth v2 & Historical Poller",
-      description: "Real-time webhook listener and background thread poller for operational SOP decrees.",
+      description:
+        "Real-time webhook listener and background thread poller for operational SOP decrees.",
       target: "conversations.history & webhooks",
       color: "border-emerald-200 bg-emerald-50 text-emerald-800",
       oauth: true,
@@ -130,7 +149,8 @@ export function IntegrationsModal({
       provider: "github",
       name: "GitHub",
       type: "GitHub App & Incident Sweeper",
-      description: "Monitors closed issues, pull requests, and post-mortems for incident resolution steps.",
+      description:
+        "Monitors closed issues, pull requests, and post-mortems for incident resolution steps.",
       target: "repos/issues & webhooks",
       color: "border-sky-200 bg-sky-50 text-sky-800",
       oauth: true,
@@ -139,7 +159,8 @@ export function IntegrationsModal({
       provider: "gmail",
       name: "Email Shared Inbox",
       type: "Gmail OAuth 2.0 Connector",
-      description: "Polls shared ops support inboxes for incident runbook emails with auto-refreshed OAuth tokens.",
+      description:
+        "Polls shared ops support inboxes for incident runbook emails with auto-refreshed OAuth tokens.",
       target: "gmail.googleapis.com/gmail/v1",
       color: "border-violet-200 bg-violet-50 text-violet-800",
       oauth: true,
@@ -148,7 +169,8 @@ export function IntegrationsModal({
       provider: "linear",
       name: "Linear",
       type: "GraphQL & Ticket Connector",
-      description: "Sweeps completed high-priority P0/P1 outage tickets and triage notes.",
+      description:
+        "Sweeps completed high-priority P0/P1 outage tickets and triage notes.",
       target: "api.linear.app/graphql",
       color: "border-indigo-200 bg-indigo-50 text-indigo-800",
       oauth: false,
@@ -157,7 +179,8 @@ export function IntegrationsModal({
       provider: "zendesk",
       name: "Zendesk Support",
       type: "REST Support Ingestion",
-      description: "Ingests support escalation tickets and tier-3 troubleshooting runbooks.",
+      description:
+        "Ingests support escalation tickets and tier-3 troubleshooting runbooks.",
       target: "/api/ingestion/webhook/zendesk",
       color: "border-purple-200 bg-purple-50 text-purple-800",
       oauth: false,
@@ -166,7 +189,8 @@ export function IntegrationsModal({
       provider: "database",
       name: "Database Runbooks",
       type: "Schema & Routine Scanner",
-      description: "Scans stored procedures and slow query log patterns for tacit DB management SOPs.",
+      description:
+        "Scans stored procedures and slow query log patterns for tacit DB management SOPs.",
       target: "/api/ingestion/webhook/database",
       color: "border-blue-200 bg-blue-50 text-blue-800",
       oauth: false,
@@ -175,7 +199,8 @@ export function IntegrationsModal({
       provider: "stripe",
       name: "Stripe & Target Execution",
       type: "Tool Registry Integration",
-      description: "Registered target system connection for FastMCP step execution dispatches.",
+      description:
+        "Registered target system connection for FastMCP step execution dispatches.",
       target: "integration_connections table",
       color: "border-[#0071e3]/20 bg-[#0071e3]/[0.08] text-[#0071e3]",
       oauth: false,
@@ -200,9 +225,12 @@ export function IntegrationsModal({
                   Multi-Source Knowledge Pipeline
                 </span>
               </div>
-              <h2 className="text-[21px] font-semibold tracking-tight text-[#1d1d1f]">Connected Target Integrations</h2>
+              <h2 className="text-[21px] font-semibold tracking-tight text-[#1d1d1f]">
+                Connected Target Integrations
+              </h2>
               <p className="text-[12.5px] text-[#6e6e73]">
-                Active OAuth integrations, webhook endpoints, historical crawlers, and target system execution connectors.
+                Active OAuth integrations, webhook endpoints, historical
+                crawlers, and target system execution connectors.
               </p>
             </div>
             <button
@@ -225,39 +253,61 @@ export function IntegrationsModal({
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {catalog.map((item) => {
-                const liveStatus = integrations.find((i) => i.provider === item.provider);
+                const liveStatus = integrations.find(
+                  (i) => i.provider === item.provider,
+                );
                 const isConnected = liveStatus?.connected ?? false;
                 const isDemoMode = liveStatus?.is_demo_mode ?? false;
                 const isConfigured = liveStatus?.platform_configured ?? false;
-                const statusText = liveStatus?.status || (isConnected ? "Active" : "Not Connected");
+                const statusText =
+                  liveStatus?.status ||
+                  (isConnected ? "Active" : "Not Connected");
 
                 return (
-                  <div key={item.name} className="flex flex-col justify-between gap-3 rounded-2xl border border-black/[0.08] bg-white/80 p-4 shadow-sm">
+                  <div
+                    key={item.name}
+                    className="flex flex-col justify-between gap-3 rounded-2xl border border-black/[0.08] bg-white/80 p-4 shadow-sm"
+                  >
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-[15px] font-bold text-[#1d1d1f]">{item.name}</h3>
+                        <h3 className="text-[15px] font-bold text-[#1d1d1f]">
+                          {item.name}
+                        </h3>
                         <div className="flex items-center gap-1.5">
                           {isDemoMode && (
                             <span className="inline-flex items-center gap-1 rounded-2xl border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9.5px] font-semibold text-blue-700 uppercase">
-                              <Sparkles className="h-2.5 w-2.5" /> Shared Demo App
+                              <Sparkles className="h-2.5 w-2.5" /> Shared Demo
+                              App
                             </span>
                           )}
-                          <span className={`inline-flex items-center gap-1 rounded-2xl border px-2.5 py-0.5 text-[10px] font-semibold uppercase ${
-                            isConnected ? item.color : "border-slate-200 bg-slate-100 text-slate-600"
-                          }`}>
-                            {isConnected ? <CheckCircle2 className="h-3 w-3" /> : null}
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-2xl border px-2.5 py-0.5 text-[10px] font-semibold uppercase ${
+                              isConnected
+                                ? item.color
+                                : "border-slate-200 bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {isConnected ? (
+                              <CheckCircle2 className="h-3 w-3" />
+                            ) : null}
                             {statusText}
                           </span>
                         </div>
                       </div>
-                      <p className="text-[11px] font-semibold text-[#0071e3]">{item.type}</p>
-                      <p className="text-[12.5px] text-[#6e6e73] leading-relaxed">{item.description}</p>
+                      <p className="text-[11px] font-semibold text-[#0071e3]">
+                        {item.type}
+                      </p>
+                      <p className="text-[12.5px] text-[#6e6e73] leading-relaxed">
+                        {item.description}
+                      </p>
                     </div>
 
                     <div className="space-y-2 border-t border-black/[0.05] pt-3">
                       <div className="flex items-center justify-between text-[11px] font-mono text-slate-700">
                         <span>Target:</span>
-                        <span className="font-semibold text-[#1d1d1f]">{item.target}</span>
+                        <span className="font-semibold text-[#1d1d1f]">
+                          {item.target}
+                        </span>
                       </div>
 
                       {item.oauth && (
@@ -285,7 +335,8 @@ export function IntegrationsModal({
                                 onClick={() => handleConnect(item.provider)}
                                 className="flex items-center gap-1.5 rounded-lg bg-[#0071e3] px-3.5 py-1.5 text-[11.5px] font-medium text-white shadow-sm hover:bg-[#0077ed] active:scale-95 transition-all"
                               >
-                                <ExternalLink className="h-3.5 w-3.5" /> Connect {item.name}
+                                <ExternalLink className="h-3.5 w-3.5" /> Connect{" "}
+                                {item.name}
                               </button>
                             </div>
                           )}
@@ -300,7 +351,8 @@ export function IntegrationsModal({
 
           <footer className="flex items-center justify-between border-t border-black/[0.06] p-5">
             <p className="flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" /> CSRF Nonces & AES-256 Token Encryption Active
+              <ShieldCheck className="h-4 w-4 text-emerald-600" /> CSRF Nonces &
+              AES-256 Token Encryption Active
             </p>
             <button
               type="button"

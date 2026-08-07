@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import { supabase } from '../config/supabase.js';
 import { dispatchStepExecution } from '../services/integrations/http_adapters.js';
 import { ExecutionPlan, ExecutedStepResult, WorkflowContext } from './types.js';
@@ -16,7 +17,7 @@ export async function executePlan(
   const stepOutputs: Record<string, any> = {};
 
   for (const step of plan.steps) {
-    console.log(`[Executor Agent] Running Step ${step.step_number} (${step.action}) on ${step.target_system}...`);
+    logger.info(`[Executor Agent] Running Step ${step.step_number} (${step.action}) on ${step.target_system}...`);
 
     // 1. Resolve variable dependencies from previous step outputs (e.g. $step_1.output)
     const resolvedParams: Record<string, any> = { ...step.parameters };
@@ -44,7 +45,7 @@ export async function executePlan(
 
     // 3. Self-healing Retry Engine: If execution failed, attempt automatic code/parameter repair up to 3 times
     if (!httpRes.success && step.parameters?.code) {
-      console.warn(`[Executor Agent] Step ${step.step_number} failed. Triggering ToolSelfHealer sandbox recovery...`);
+      logger.warn(`[Executor Agent] Step ${step.step_number} failed. Triggering ToolSelfHealer sandbox recovery...`);
       const healResult = await selfHealAndRetryCode(step.parameters.code, {}, 3);
       if (healResult.success) {
         httpRes = {
@@ -52,7 +53,7 @@ export async function executePlan(
           status_code: 200,
           response_data: healResult.output || { message: healResult.stdout || 'Self-healed execution succeeded.' },
         };
-        console.log(`[Executor Agent] Step ${step.step_number} self-healed successfully after ${healResult.attemptsUsed} attempts.`);
+        logger.info(`[Executor Agent] Step ${step.step_number} self-healed successfully after ${healResult.attemptsUsed} attempts.`);
       }
     }
 
@@ -63,7 +64,7 @@ export async function executePlan(
         { title: plan.sop_title, content: plan.user_query },
       ]);
       if (!grounding.grounded) {
-        console.warn(`[Executor Warning] Step ${step.step_number} output flagged by Grounding Guardrail:`, grounding.hallucinatedClaims);
+        logger.warn(`[Executor Warning] Step ${step.step_number} output flagged by Grounding Guardrail:`, grounding.hallucinatedClaims);
         finalResponseData = {
           ...httpRes.response_data,
           warning: 'Ungrounded claims intercepted by Grounding Guardrail.',
@@ -97,11 +98,11 @@ export async function executePlan(
         outcome: stepResult.outcome,
       });
     } catch (logErr) {
-      console.warn('[Executor Warning] Failed to log step execution:', logErr);
+      logger.warn('[Executor Warning] Failed to log step execution:', logErr);
     }
 
     if (!httpRes.success) {
-      console.error(`[Executor Agent] Step ${step.step_number} failed after self-healing attempts. Halting workflow execution.`);
+      logger.error(`[Executor Agent] Step ${step.step_number} failed after self-healing attempts. Halting workflow execution.`);
       break;
     }
   }

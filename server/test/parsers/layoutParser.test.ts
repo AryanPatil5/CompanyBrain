@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { parsePdfWithLayout, parseSpreadsheet, parseLayout } from '../../src/services/parsers/layoutParser.js';
+import { parsePdfWithLayout, parseSpreadsheet } from '../../src/services/parsers/layoutParser.js';
 
 export async function runLayoutParserTest(): Promise<boolean> {
   console.log('\n=================================================');

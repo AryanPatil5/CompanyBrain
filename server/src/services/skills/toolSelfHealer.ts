@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { e2bSandboxEngine, SandboxResult, IsolationSecurityError } from './e2bSandboxEngine.js';
 
 export interface SelfHealResult {
@@ -56,7 +57,7 @@ export async function selfHealAndRetryCode(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      console.log(`[ToolSelfHealer] Executing sandbox code (Attempt ${attempt}/${maxAttempts})...`);
+      logger.info(`[ToolSelfHealer] Executing sandbox code (Attempt ${attempt}/${maxAttempts})...`);
       const result: SandboxResult = await e2bSandboxEngine.executeScript(currentCode, envVars, 30000);
 
       return {
@@ -70,7 +71,7 @@ export async function selfHealAndRetryCode(
       };
     } catch (err: any) {
       const errorTrace = err.message || String(err);
-      console.warn(`[ToolSelfHealer Warning] Sandbox execution failed on attempt ${attempt}:`, errorTrace);
+      logger.warn(`[ToolSelfHealer Warning] Sandbox execution failed on attempt ${attempt}:`, errorTrace);
 
       // Do NOT attempt self-healing on explicit security violations (e.g. prototype pollution RCE)
       if (err instanceof IsolationSecurityError || errorTrace.includes('IsolationSecurityError')) {

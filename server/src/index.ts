@@ -1,19 +1,25 @@
+import { logger } from './logger.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import type { Server } from 'node:http';
 import ingestionRouter from './routes/ingestion.js';
 import sopsRouter from './routes/sops.js';
 import integrationsRouter from './routes/integrations.js';
 import webhooksRouter from './routes/webhooks.js';
 import githubRouter from './routes/github.js';
-import { startMCPServer } from './services/mcp.js';
-import { startCrawlerWorker, stopCrawlerWorker } from './services/crawler.js';
-import { startIngestionWorker, stopIngestionWorker } from './workers/ingestionWorker.js';
-import { startGithubSyncWorker, stopGithubSyncWorker } from './workers/githubSyncWorker.js';
-import { startTemporalWorker, stopTemporalWorker } from './workers/temporalWorker.js';
 
 import { observabilityMiddleware, getMetricsSnapshot } from './middleware/observability.js';
 import { telemetryMiddleware, getPrometheusMetricsString } from './middleware/telemetry.js';
+import { correlationIdMiddleware } from './middleware/correlationId.js';
+import {
+  buildHealthPayload,
+  checkAIProviderConfigured,
+  checkPostgres,
+  checkRedis,
+  checkSupabase,
+  getProcessStats,
+} from './services/health.js';
 
 dotenv.config();
 
@@ -26,6 +32,7 @@ if (process.env.NODE_ENV === 'production' && process.env.PROVISIONED_WORKSPACE_I
 const app = express();
 const PORT = process.env.PORT || 5001; // Updated default port to 5001 to avoid macOS AirPlay conflict
 
+app.use(correlationIdMiddleware());
 app.use(observabilityMiddleware());
 app.use(telemetryMiddleware());
 
@@ -75,8 +82,19 @@ app.use('/api/integrations', integrationsRouter);
 app.use('/api/v1/webhooks', webhooksRouter);
 app.use('/api/github', githubRouter);
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'Company Brain Backend' });
+app.get('/health', async (_req, res) => {
+  const payload = await buildHealthPayload(
+    'api',
+    {
+      postgres: () => checkPostgres(),
+      redis: () => checkRedis(),
+      supabase: () => checkSupabase(),
+      'ai-provider': () => checkAIProviderConfigured(),
+    },
+    getProcessStats('api')
+  );
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(payload);
 });
 
 app.get('/api/metrics', (_req, res) => {
@@ -88,38 +106,14 @@ app.get('/metrics', (_req, res) => {
   res.send(getPrometheusMetricsString());
 });
 
-// Start Express API Server
-const server = app.listen(PORT, () => {
-  console.log(`[INFO] Company Brain REST API running at http://localhost:${PORT}`);
-});
-
-// Start FastMCP Server for AI Agents
-startMCPServer();
-
-// Start Background Knowledge Crawler Worker
-startCrawlerWorker();
-
-// Start BullMQ Asynchronous Ingestion Worker (Concurrency: 2)
-startIngestionWorker();
-
-// Start GitHub Connector Sync Worker
-startGithubSyncWorker();
-
-// Start Temporal.io Durable Workflow Worker
-startTemporalWorker();
-
-// Graceful Shutdown Handlers
-const shutdown = async () => {
-  console.log('[INFO] Gracefully shutting down Express server...');
-  stopCrawlerWorker();
-  await stopIngestionWorker();
-  await stopGithubSyncWorker();
-  await stopTemporalWorker();
-  server.close(() => {
-    console.log('[INFO] Server closed and port released.');
-    process.exit(0);
+/**
+ * Starts the Express REST API server. Called by the `api` process only
+ * (see bootstrap.ts / entrypoints/api.ts); worker startup moved to the
+ * per-process boot topology.
+ */
+export function startApiServer(): Server {
+  const server = app.listen(PORT, () => {
+    logger.info(`[INFO] Company Brain REST API running at http://localhost:${PORT}`);
   });
-};
-
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+  return server;
+}

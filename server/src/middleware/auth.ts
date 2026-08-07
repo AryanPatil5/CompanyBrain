@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/supabase.js';
+import { isProduction } from '../services/security/keyProvider.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -26,7 +27,7 @@ function decodeJwtPayload(token: string): any {
 }
 
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
-  const isProdMode = process.env.NODE_ENV === 'production';
+  const isProdMode = isProduction();
   const authHeader = req.headers['authorization'];
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

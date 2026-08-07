@@ -1,6 +1,7 @@
+import { logger } from '../logger.js';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '../config/supabase.js';
-import { generateEmbedding } from '../services/embeddings.js';
+import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../services/embeddings.js';
 import { chunkText, hashContent, TextChunk } from './chunker.js';
 
 export interface PersistSourceDocumentInput {
@@ -67,7 +68,7 @@ export async function persistSourceDocumentWithChunks(
       .single();
 
     if (docErr || !document) {
-      console.warn('[SourceObjects Warning] Failed to persist source document:', docErr);
+      logger.warn('[SourceObjects Warning] Failed to persist source document:', docErr);
       return null;
     }
 
@@ -86,20 +87,22 @@ export async function persistSourceDocumentWithChunks(
 
     const rows = [];
     let embeddingSuccessCount = 0;
-    let embeddingFailureCount = 0;
 
     for (const chunk of chunks) {
-      let embedding = null;
+      let embedding: number[] | null = null;
       try {
         embedding = await generateEmbedding(chunk.content);
-        if (embedding) {
-          embeddingSuccessCount++;
-        } else {
-          embeddingFailureCount++;
-        }
+        embeddingSuccessCount++;
       } catch (embErr) {
-        embeddingFailureCount++;
-        console.warn(`[SourceObjects Warning] Failed to generate embedding for chunk ${chunk.chunk_index}:`, embErr);
+        // Never persist chunks without real embeddings: record the failed state
+        // and rethrow so the caller can retry the ingestion.
+        await recordEmbeddingFailure({
+          workspaceId: input.workspaceId,
+          source: input.source,
+          rawContent: chunk.content,
+          error: embErr,
+        });
+        throw embErr;
       }
 
       rows.push({
@@ -116,10 +119,8 @@ export async function persistSourceDocumentWithChunks(
       });
     }
 
-    if (embeddingFailureCount > 0) {
-      console.warn(
-        `[SourceObjects Warning] Embeddings: ${embeddingSuccessCount} success, ${embeddingFailureCount} failures for document ${document.id}`
-      );
+    if (rows.length > 0) {
+      logger.info(`[SourceObjects] Generated embeddings for ${embeddingSuccessCount}/${rows.length} chunks of document ${document.id}`);
     }
 
     const { error: chunkErr } = await client
@@ -127,7 +128,7 @@ export async function persistSourceDocumentWithChunks(
       .upsert(rows, { onConflict: 'source_document_id, chunk_index' });
 
     if (chunkErr) {
-      console.warn('[SourceObjects Warning] Failed to persist document chunks:', chunkErr);
+      logger.warn('[SourceObjects Warning] Failed to persist document chunks:', chunkErr);
       return { id: document.id, source_key: document.source_key, chunksPersisted: 0, chunks };
     }
 
@@ -146,7 +147,7 @@ export async function persistSourceDocumentWithChunks(
         .from('source_document_acls')
         .upsert(aclRows, { onConflict: 'source_document_id, principal_type, principal_id, permission' });
       if (aclErr) {
-        console.warn('[SourceObjects Warning] Failed to persist source ACL rows:', aclErr);
+        logger.warn('[SourceObjects Warning] Failed to persist source ACL rows:', aclErr);
       }
     }
 
@@ -157,7 +158,10 @@ export async function persistSourceDocumentWithChunks(
       chunks,
     };
   } catch (err) {
-    console.warn('[SourceObjects Warning] Source document persistence skipped:', err);
+    if (err instanceof EmbeddingError) {
+      throw err;
+    }
+    logger.warn('[SourceObjects Warning] Source document persistence skipped:', err);
     return null;
   }
 }

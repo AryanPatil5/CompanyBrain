@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: apache/age:release_PG16_1.6.0
+    # pgvector variant of postgres 16: migrations require the `vector`
+    # extension (005+); plain postgres images cannot apply the schema.
+    image: pgvector/pgvector:pg16
     container_name: company_brain_postgres
     restart: unless-stopped
     ports:
@@ -11,6 +13,11 @@ services:
       POSTGRES_DB: company_brain
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brain_user -d company_brain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -24,13 +31,130 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
           memory: 256M
 
+  # MinIO: S3-compatible object storage substrate (ADR-T6 / Phase 0 Task 8).
+  # Dev-only credentials; production credentials come from Helm/secrets.
+  minio:
+    image: minio/minio:latest
+    container_name: company_brain_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Temporal server (auto-setup runs schema migrations against compose Postgres).
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: company_brain_temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7233:7233"
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: brain_user
+      POSTGRES_PWD: brain_password
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator cluster health --address $(hostname):7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # Temporal Web UI (port 8088; 8080 is reserved for FastMCP in this repo).
+  temporal-ui:
+    image: temporalio/ui:latest
+    container_name: company_brain_temporal_ui
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    ports:
+      - "8088:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "*"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # HashiCorp Vault (dev mode). Disabled by default — enable with:
+  #   docker compose --profile optional up -d
+  # Dev-only; production Vault/KMS wiring lands with the keyProvider work.
+  vault:
+    image: hashicorp/vault:latest
+    container_name: company_brain_vault
+    restart: unless-stopped
+    profiles: ["optional"]
+    cap_add:
+      - IPC_LOCK
+    command: server -dev -dev-root-token-id=company-brain-dev-root-token
+    ports:
+      - "8200:8200"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # OpenFGA (in-memory datastore, dev). Disabled by default — enable with:
+  #   docker compose --profile optional up -d
+  # Real PDP wiring is Phase 5 behind AUTHZ_BACKEND=openfga.
+  # Playground published on 3001 because the client dev server owns 3000.
+  openfga:
+    image: openfga/openfga:latest
+    container_name: company_brain_openfga
+    restart: unless-stopped
+    profiles: ["optional"]
+    ports:
+      - "8081:8080"
+      - "8082:8081"
+      - "3001:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
 volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  minio_data:
     driver: local

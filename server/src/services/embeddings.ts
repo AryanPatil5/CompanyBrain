@@ -1,8 +1,11 @@
+import { logger } from '../logger.js';
 import dotenv from 'dotenv';
-import { generateEmbeddings as getAiEmbeddings } from './aiProvider.js';
+import { generateEmbeddings as getAiEmbeddings, EmbeddingError } from './aiProvider.js';
 import { supabase } from '../config/supabase.js';
 
 dotenv.config();
+
+export { EmbeddingError };
 
 export interface DLACSearchResult {
   id: string;
@@ -15,20 +18,39 @@ export interface DLACSearchResult {
   source_document_id?: string;
 }
 
+/**
+ * Generates a real embedding vector for the given text.
+ *
+ * Returns null only for empty input. Any embedding generation failure throws a
+ * typed EmbeddingError — failures never silently degrade to null or fake vectors.
+ */
 export async function generateEmbedding(text: string): Promise<number[] | null> {
   const cleanText = text.trim();
   if (!cleanText) return null;
+  return getAiEmbeddings(cleanText);
+}
 
+/**
+ * Marks an ingestion as embedding_failed by writing an audit row to
+ * ingestion_failures. Never throws; failure to record is logged only.
+ */
+export async function recordEmbeddingFailure(params: {
+  workspaceId?: string | null;
+  source?: string | null;
+  rawContent?: string;
+  error: unknown;
+}): Promise<void> {
+  const message = params.error instanceof Error ? params.error.message : String(params.error);
   try {
-    const vector = await getAiEmbeddings(cleanText);
-    if (Array.isArray(vector) && vector.length === 1536) {
-      return vector;
-    }
+    await supabase.from('ingestion_failures').insert({
+      workspace_id: params.workspaceId || null,
+      source: params.source || 'unknown',
+      raw_content: params.rawContent || '',
+      error_message: `embedding_failed: ${message}`,
+    });
   } catch (err) {
-    console.warn('[Embeddings] Failed to generate embedding vector:', err);
+    logger.warn('[Embeddings] Failed to record embedding failure:', err);
   }
-
-  return null;
 }
 
 /**
@@ -77,7 +99,7 @@ export async function searchVectorContextDLAC(params: {
     }
 
     return await fallbackInMemoryDLACSearch(queryEmbedding, workspaceId, userId, role, allowedDocIds, matchThreshold, matchCount);
-  } catch (err) {
+  } catch {
     return await fallbackInMemoryDLACSearch(queryEmbedding, workspaceId, userId, role, allowedDocIds, matchThreshold, matchCount);
   }
 }
@@ -95,12 +117,12 @@ async function fallbackInMemoryDLACSearch(
     const chunkResults = await fallbackChunkSearch(queryEmbedding, workspaceId, role, allowedDocIds, matchThreshold, matchCount);
     if (chunkResults.length > 0 || (allowedDocIds !== null && allowedDocIds.length === 0)) {
       if (chunkResults.length > 0) {
-        console.log(`[Retrieval] Retrieved ${chunkResults.length} chunks from document_chunks (workspace: ${workspaceId})`);
+        logger.info(`[Retrieval] Retrieved ${chunkResults.length} chunks from document_chunks (workspace: ${workspaceId})`);
       }
       return chunkResults;
     }
 
-    console.warn(
+    logger.warn(
       `[Retrieval] No chunks found; falling back to skills_sops (workspace: ${workspaceId}, role: ${role}, allowedDocIds: ${allowedDocIds})`
     );
 
@@ -121,7 +143,7 @@ async function fallbackInMemoryDLACSearch(
       return !s.requires_human_gate && (s.risk_level === 'Low' || s.risk_level === 'Medium');
     });
 
-    console.log(`[Retrieval] Retrieved ${filtered.length} SOPs from skills_sops fallback`);
+    logger.info(`[Retrieval] Retrieved ${filtered.length} SOPs from skills_sops fallback`);
 
     return filtered.slice(0, matchCount).map((s, idx) => ({
       id: s.id,
@@ -134,7 +156,7 @@ async function fallbackInMemoryDLACSearch(
       source_document_id: s.id,
     }));
   } catch (err) {
-    console.error('[Retrieval Error] Fallback search failed:', err);
+    logger.error('[Retrieval Error] Fallback search failed:', err);
     return [];
   }
 }

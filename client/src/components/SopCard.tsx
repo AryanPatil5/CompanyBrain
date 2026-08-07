@@ -1,5 +1,11 @@
 import type { Sop, RiskLevel } from "@/lib/sops";
-import { ChevronRight, ShieldCheck, AlertTriangle, History, ShieldAlert } from "lucide-react";
+import {
+  ChevronRight,
+  ShieldCheck,
+  AlertTriangle,
+  History,
+  ShieldAlert,
+} from "lucide-react";
 
 const CATEGORY_TINT: Record<string, string> = {
   Engineering: "text-sky-800 border-sky-200 bg-sky-50",
@@ -53,7 +59,8 @@ export function SopCard({
           <span
             className={[
               "rounded-2xl border px-2.5 py-1 text-[11px] font-semibold tracking-wide backdrop-blur-xl",
-              CATEGORY_TINT[sop.category] ?? "text-indigo-800 border-indigo-200 bg-indigo-50",
+              CATEGORY_TINT[sop.category] ??
+                "text-indigo-800 border-indigo-200 bg-indigo-50",
             ].join(" ")}
           >
             {sop.category}
@@ -69,8 +76,7 @@ export function SopCard({
           </span>
           {sop.version > 1 && (
             <span className="flex items-center gap-1 rounded-2xl border border-black/[0.08] bg-black/[0.03] px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-              <History className="h-2.5 w-2.5" />
-              v{sop.version}
+              <History className="h-2.5 w-2.5" />v{sop.version}
             </span>
           )}
         </div>
@@ -86,7 +92,9 @@ export function SopCard({
       </div>
 
       <div className="space-y-1.5">
-        <h3 className="text-[17px] leading-snug font-semibold text-[#1d1d1f]">{sop.title}</h3>
+        <h3 className="text-[17px] leading-snug font-semibold text-[#1d1d1f]">
+          {sop.title}
+        </h3>
         <p className="text-[13px] leading-relaxed text-[#6e6e73]">
           {sop.summary}
         </p>
@@ -103,7 +111,8 @@ export function SopCard({
 
       {sop.requiresHumanGate && (
         <p className="flex items-center gap-1.5 text-[11px] text-amber-800 font-semibold">
-          <ShieldAlert className="h-3 w-3" /> Execution Gate: Human approval required before agent execution.
+          <ShieldAlert className="h-3 w-3" /> Execution Gate: Human approval
+          required before agent execution.
         </p>
       )}
 

@@ -7,6 +7,13 @@ import { createGitHubAppAuth } from '../connectors/github/auth.js';
 import { createGithubSyncService } from '../connectors/github/sync.js';
 import { createGithubWebhookHandler } from '../connectors/github/webhook.js';
 import type { GithubSyncJobData } from '../connectors/github/types.js';
+import {
+  checkBullMQQueueCounts,
+  checkRedis,
+  checkSupabase,
+  withTimeout,
+  startHealthServer,
+} from '../services/health.js';
 
 let workerInstance: Worker<GithubSyncJobData> | null = null;
 
@@ -179,11 +186,49 @@ export function createGithubSyncWorker(): Worker<GithubSyncJobData> {
   return worker;
 }
 
+export function isGithubSyncWorkerRunning(): boolean {
+  return workerInstance !== null && workerInstance.isRunning();
+}
+
+export function isGithubTokenConfigured(): boolean {
+  const appId = (process.env.GITHUB_APP_ID || '').trim();
+  const privateKey = (process.env.GITHUB_APP_PRIVATE_KEY || '').trim();
+  const privateKeyPath = (process.env.GITHUB_APP_PRIVATE_KEY_PATH || '').trim();
+  return appId.length > 0 && (privateKey.length > 0 || privateKeyPath.length > 0);
+}
+
 export function startGithubSyncWorker(): Worker<GithubSyncJobData> {
   if (!workerInstance) {
     logger.info('github_worker_starting', {});
     workerInstance = createGithubSyncWorker();
   }
+  const healthPort = parseInt(process.env.GITHUB_SYNC_WORKER_HEALTH_PORT || '5005', 10);
+  startHealthServer('github-sync-worker', healthPort, {
+    checks: {
+      redis: () => checkRedis(),
+      supabase: () => checkSupabase(),
+    },
+    details: async () => {
+      const queue = await checkBullMQQueueCounts(githubSyncQueue);
+      const lastSyncAt = await withTimeout(2500, Promise.resolve()
+        .then(async () => {
+          const { data } = await supabase
+            .from('github_repositories')
+            .select('last_sync_at')
+            .not('last_sync_at', 'is', null)
+            .order('last_sync_at', { ascending: false })
+            .limit(1);
+          return data && data.length > 0 ? data[0].last_sync_at : null;
+        })
+        .catch(() => null));
+      return {
+        workerRunning: isGithubSyncWorkerRunning(),
+        tokenConfigured: isGithubTokenConfigured(),
+        queue: queue || 'unknown',
+        lastSyncAt,
+      };
+    },
+  });
   return workerInstance;
 }
 

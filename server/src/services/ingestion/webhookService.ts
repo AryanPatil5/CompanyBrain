@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import crypto from 'node:crypto';
 import { supabase } from '../../config/supabase.js';
 
@@ -34,7 +35,7 @@ export function verifyWebhookSignature(
       return crypto.timingSafeEqual(Buffer.from(signatureHeader), Buffer.from(expectedSig));
     }
   } catch (err) {
-    console.warn('[WebhookService Warning] HMAC Signature verification exception:', err);
+    logger.warn('[WebhookService Warning] HMAC Signature verification exception:', err);
     return false;
   }
 
@@ -79,7 +80,7 @@ export async function processWebhookEvent(
 
     return { processed: true };
   } catch (err: any) {
-    console.warn('[WebhookService Warning] Failed to process incremental webhook update:', err);
+    logger.warn('[WebhookService Warning] Failed to process incremental webhook update:', err);
     return { processed: true };
   }
 }

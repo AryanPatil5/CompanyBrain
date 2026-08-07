@@ -1,10 +1,13 @@
+import { logger } from '../logger.js';
 import { FastMCP } from 'fastmcp';
 import { z } from 'zod';
 import { supabase } from '../config/supabase.js';
+import { isProduction } from './security/keyProvider.js';
 import { dispatchStepExecution } from './integrations/http_adapters.js';
 import { runWorkflow } from '../agents/orchestrator.js';
 import { compileOpenApiSpec } from './skills/openApiCompiler.js';
 import { executeInSandbox } from './skills/sandboxEngine.js';
+import { checkSupabase, getProcessStats, setProcessStat, startHealthServer } from './health.js';
 
 export interface McpSessionContext {
   authenticated: boolean;
@@ -97,8 +100,8 @@ export async function authenticateMcpToken(token?: string): Promise<McpSessionCo
     // Non-fatal query catch
   }
 
-  // Fallback tokens strictly gated behind process.env.NODE_ENV !== 'production'
-  if (process.env.NODE_ENV !== 'production') {
+  // Fallback tokens strictly gated behind development/test mode
+  if (!isProduction()) {
     if (cleanToken === 'mcp-admin-key-99') {
       return { authenticated: true, agentId: 'admin-worker-01', workspaceId: '00000000-0000-0000-0000-000000000000', trustRole: 'admin' };
     }
@@ -145,7 +148,7 @@ async function logExecution(
       outcome,
     });
   } catch (err) {
-    console.warn('[MCP] Failed to log execution:', err);
+    logger.warn('[MCP] Failed to log execution:', err);
   }
 }
 
@@ -628,9 +631,36 @@ server.addTool({
 });
 
 export function startMCPServer() {
+  // The fastmcp library has no logger option and prints its startup banner
+  // via console.info; route it through our structured logger so no output
+  // bypasses redaction/formatting. All other console.* calls were removed
+  // from runtime code (Phase 0 Task 9).
+  const consoleRef = console;
+  consoleRef.info = (msg: unknown, ...args: unknown[]) => {
+    logger.info(String(msg), args.length > 0 ? { args } : undefined);
+  };
+
   server.start({
     transportType: 'httpStream',
     httpStream: { port: 8080, endpoint: '/mcp' },
   });
-  console.log('[INFO] Company Brain FastMCP Server v2.5 (Token Authentication & Role Binding Active) running on http://localhost:8080');
+  setProcessStat('mcp', 'running', true);
+  setProcessStat('mcp', 'authInitialized', true);
+
+  const healthPort = parseInt(process.env.MCP_HEALTH_PORT || '5003', 10);
+  startHealthServer('mcp', healthPort, {
+    checks: {
+      'mcp-running': () => Promise.resolve(getProcessStats('mcp').running === true),
+      auth: () => Promise.resolve(getProcessStats('mcp').authInitialized === true),
+      supabase: () => checkSupabase(),
+    },
+    details: () => ({
+      transport: 'httpStream',
+      endpoint: '/mcp',
+      port: 8080,
+      ...getProcessStats('mcp'),
+    }),
+  });
+
+  logger.info('[INFO] Company Brain FastMCP Server v2.5 (Token Authentication & Role Binding Active) running on http://localhost:8080');
 }

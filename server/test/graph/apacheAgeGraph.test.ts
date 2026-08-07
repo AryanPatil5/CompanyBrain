@@ -2,7 +2,7 @@ import { addEntityNode, createRelationship, getConnectedEntities } from '../../s
 
 export async function runApacheAgeGraphTest(): Promise<boolean> {
   console.log('\n=================================================');
-  console.log('  Running Apache AGE Graph Integration Test Suite');
+  console.log('  Running Relational Knowledge Graph Integration Test Suite');
   console.log('=================================================');
 
   const workspaceId = '00000000-0000-0000-0000-000000000000';
@@ -29,7 +29,7 @@ export async function runApacheAgeGraphTest(): Promise<boolean> {
   console.log('✅ AGE GRAPH TEST PASSED: Created edge relationships (OWNS, MODIFIES).');
 
   // 3. Perform Multi-hop Traversal (getConnectedEntities)
-  const connected = await getConnectedEntities('person_ops_admin', 2);
+  const connected = await getConnectedEntities('person_ops_admin', 2, { workspaceId });
 
   if (!Array.isArray(connected)) {
     console.error('❌ AGE GRAPH TEST FAILED: getConnectedEntities returned non-array!');

@@ -1,4 +1,4 @@
-import { isEdgeTemporallyValid, calculateTemporalDecayScore, filterActiveEdges } from '../../src/services/graph/temporalGraphService.js';
+import { isEdgeTemporallyValid, calculateTemporalDecayScore } from '../../src/services/graph/temporalGraphService.js';
 import { addEntityNode, createRelationship, getConnectedEntities } from '../../src/services/graph/graphService.js';
 
 export async function runTemporalGraphServiceTest(): Promise<boolean> {

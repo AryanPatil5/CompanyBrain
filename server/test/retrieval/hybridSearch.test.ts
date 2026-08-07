@@ -23,7 +23,7 @@ export async function runHybridSearchTest(): Promise<boolean> {
   }
 
   // 2. Search for exact string query "SKU-8941"
-  const skuResults = await hybridSearch({
+  await hybridSearch({
     query: 'SKU-8941',
     workspaceId,
     userId,

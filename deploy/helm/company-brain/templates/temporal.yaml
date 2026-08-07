@@ -1,0 +1,74 @@
+{{- if .Values.infra.temporal.enabled }}
+{{- $name := include "company-brain.component" (merge (dict "suffix" "temporal") .) }}
+{{- $postgresSeeds := include "company-brain.component" (merge (dict "suffix" "postgres") .) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: infra
+spec:
+  replicas: {{ .Values.infra.temporal.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/component: infra
+    spec:
+      containers:
+        - name: temporal
+          image: "{{ .Values.infra.temporal.image.repository }}:{{ .Values.infra.temporal.image.tag }}"
+          imagePullPolicy: {{ .Values.infra.temporal.image.pullPolicy }}
+          ports:
+            - name: frontend
+              containerPort: {{ .Values.infra.temporal.service.port }}
+              protocol: TCP
+          env:
+            - name: DB
+              value: {{ .Values.infra.temporal.env.DB | quote }}
+            - name: DB_PORT
+              value: {{ .Values.infra.temporal.env.DB_PORT | quote }}
+            - name: POSTGRES_SEEDS
+              value: {{ default $postgresSeeds .Values.infra.temporal.postgresSeeds | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.infra.temporal.env.POSTGRES_USER | quote }}
+            - name: POSTGRES_PWD
+              value: {{ .Values.infra.temporal.env.POSTGRES_PWD | quote }}
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "temporal operator cluster health --address $(hostname):{{ .Values.infra.temporal.service.port }}"]
+            initialDelaySeconds: {{ .Values.infra.temporal.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.temporal.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.temporal.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.temporal.probes.failureThreshold }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "temporal operator cluster health --address $(hostname):{{ .Values.infra.temporal.service.port }}"]
+            initialDelaySeconds: {{ .Values.infra.temporal.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.infra.temporal.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.infra.temporal.probes.timeoutSeconds }}
+            failureThreshold: {{ .Values.infra.temporal.probes.failureThreshold }}
+          resources:
+            {{- toYaml .Values.infra.temporal.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/component: infra
+spec:
+  type: {{ .Values.infra.temporal.service.type }}
+  ports:
+    - port: {{ .Values.infra.temporal.service.port }}
+      targetPort: frontend
+      protocol: TCP
+      name: frontend
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+{{- end }}

@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 import { supabase } from '../../config/supabase.js';
 import { generateEmbedding, searchVectorContextDLAC, type DLACSearchResult } from '../embeddings.js';
 import { extractEntitiesAndTraverse } from './graphFusion.js';
@@ -54,7 +55,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
         matchCount: limit * 3,
       });
     } catch (err) {
-      console.warn('[HybridSearch Warning] Dense vector leg failed:', err);
+      logger.warn('[HybridSearch Warning] Dense vector leg failed:', err);
       return [];
     }
   })();
@@ -92,7 +93,7 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
         similarity: 1 - idx * 0.05,
       }));
     } catch (err) {
-      console.warn('[HybridSearch Warning] Sparse keyword leg failed:', err);
+      logger.warn('[HybridSearch Warning] Sparse keyword leg failed:', err);
       return [];
     }
   })();

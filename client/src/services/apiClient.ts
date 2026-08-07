@@ -1,10 +1,10 @@
-import { API_BASE_URL } from '../lib/api-config';
-import { getToken } from '../lib/sops';
+import { API_BASE_URL } from "../lib/api-config";
+import { getToken } from "../lib/sops";
 
 const DEFAULT_HEADERS = () => ({
-  'Authorization': `Bearer ${getToken()}`,
-  'Content-Type': 'application/json',
-  'ngrok-skip-browser-warning': 'true',
+  Authorization: `Bearer ${getToken()}`,
+  "Content-Type": "application/json",
+  "ngrok-skip-browser-warning": "true",
 });
 
 export interface IngestionRunResponse {
@@ -37,7 +37,7 @@ export interface HybridSearchResultItem {
 
 export interface AgentWorkflowResponse {
   workflow_id: string;
-  status: 'completed' | 'paused_approval' | 'failed';
+  status: "completed" | "paused_approval" | "failed";
   plan?: {
     id: string;
     sop_title?: string;
@@ -85,11 +85,11 @@ export interface GraphDataResponse {
  * Trigger an asynchronous knowledge ingestion crawler run in BullMQ queue.
  */
 export async function triggerIngestion(
-  jobName: string = 'all',
-  payload: Record<string, any> = {}
+  jobName: string = "all",
+  payload: Record<string, any> = {},
 ): Promise<IngestionRunResponse> {
   const res = await fetch(`${API_BASE_URL}/api/ingestion/run`, {
-    method: 'POST',
+    method: "POST",
     headers: DEFAULT_HEADERS(),
     body: JSON.stringify({ job_name: jobName, ...payload }),
   });
@@ -104,7 +104,9 @@ export async function triggerIngestion(
 /**
  * Poll ingestion job progress status from BullMQ.
  */
-export async function getIngestionJobStatus(jobId: string): Promise<IngestionJobStatusResponse> {
+export async function getIngestionJobStatus(
+  jobId: string,
+): Promise<IngestionJobStatusResponse> {
   const res = await fetch(`${API_BASE_URL}/api/ingestion/jobs/${jobId}`, {
     headers: DEFAULT_HEADERS(),
   });
@@ -119,12 +121,17 @@ export async function getIngestionJobStatus(jobId: string): Promise<IngestionJob
 /**
  * Execute Reciprocal Rank Fusion (RRF) Hybrid Search combining pgvector dense + Postgres sparse keyword matching.
  */
-export async function searchHybrid(query: string): Promise<HybridSearchResultItem[]> {
+export async function searchHybrid(
+  query: string,
+): Promise<HybridSearchResultItem[]> {
   if (!query.trim()) return [];
 
-  const res = await fetch(`${API_BASE_URL}/api/sops/search?q=${encodeURIComponent(query)}`, {
-    headers: DEFAULT_HEADERS(),
-  });
+  const res = await fetch(
+    `${API_BASE_URL}/api/sops/search?q=${encodeURIComponent(query)}`,
+    {
+      headers: DEFAULT_HEADERS(),
+    },
+  );
 
   if (!res.ok) {
     throw new Error(`Hybrid search failed (${res.status})`);
@@ -139,10 +146,10 @@ export async function searchHybrid(query: string): Promise<HybridSearchResultIte
  */
 export async function runAgentWorkflow(
   query: string,
-  approvalId?: string
+  approvalId?: string,
 ): Promise<AgentWorkflowResponse> {
   const res = await fetch(`${API_BASE_URL}/api/sops/workflow`, {
-    method: 'POST',
+    method: "POST",
     headers: DEFAULT_HEADERS(),
     body: JSON.stringify({ query, approval_id: approvalId }),
   });

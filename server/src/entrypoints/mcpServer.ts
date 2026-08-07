@@ -1,2 +1,4 @@
-import { bootstrap } from "../bootstrap.js"; // eslint-disable-line @typescript-eslint/no-require-imports
-bootstrap(["mcp"]);
+// mcp entrypoint — starts only the FastMCP server process
+import { bootstrap } from '../bootstrap.js';
+
+bootstrap(['mcp']);

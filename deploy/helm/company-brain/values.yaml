@@ -52,3 +52,203 @@ probes:
     path: /metrics
     initialDelaySeconds: 10
     periodSeconds: 5
+
+# Infrastructure substrate (Phase 0 Task 8): mirrors the Docker Compose
+# topology. Vault and OpenFGA are disabled by default; enable via values.
+infra:
+  postgres:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: pgvector/pgvector
+      tag: pg16
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 5432
+    env:
+      POSTGRES_USER: brain_user
+      POSTGRES_PASSWORD: brain_password
+      POSTGRES_DB: company_brain
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: ""
+    probes:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 768Mi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+  redis:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: redis
+      tag: alpine
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 6379
+    persistence:
+      enabled: true
+      size: 5Gi
+      storageClassName: ""
+    probes:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  minio:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: minio/minio
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 9000
+    consolePort: 9001
+    env:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClassName: ""
+    probes:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+  temporal:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: temporalio/auto-setup
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 7233
+    # Host the auto-setup schema runner connects to for Postgres.
+    # Empty = defaults to "<release>-postgres".
+    postgresSeeds: ""
+    env:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: brain_user
+      POSTGRES_PWD: brain_password
+    probes:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+  temporalUi:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: temporalio/ui
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 8088
+    containerPort: 8080
+    # Empty = defaults to "<release>-temporal:7233".
+    temporalAddress: ""
+    corsOrigins: "*"
+    probes:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  vault:
+    enabled: false
+    replicaCount: 1
+    image:
+      repository: hashicorp/vault
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+      port: 8200
+    devRootToken: company-brain-dev-root-token
+    probes:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  openfga:
+    enabled: false
+    replicaCount: 1
+    image:
+      repository: openfga/openfga
+      tag: latest
+      pullPolicy: IfNotPresent
+    service:
+      type: ClusterIP
+    httpPort: 8080
+    grpcPort: 8081
+    playgroundPort: 3000
+    datastoreEngine: memory
+    probes:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi

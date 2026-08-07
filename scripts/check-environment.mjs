@@ -66,7 +66,7 @@ async function runCheck() {
       Details: redisStatus ? 'Active (Port 6379 responding)' : 'Ensure Redis container is running',
     },
     {
-      Service: 'PostgreSQL / AGE',
+      Service: 'PostgreSQL',
       Endpoint: 'localhost:5432',
       Status: postgresStatus ? 'HEALTHY' : 'UNREACHABLE',
       Details: postgresStatus ? 'Active (Port 5432 responding)' : 'Ensure Postgres container is running',

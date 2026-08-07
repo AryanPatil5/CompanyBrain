@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { X, Sparkles, Plus, Trash2, UserCheck, ChevronDown } from "lucide-react";
+import {
+  X,
+  Sparkles,
+  Plus,
+  Trash2,
+  UserCheck,
+  ChevronDown,
+} from "lucide-react";
 import { teachBrainApi } from "@/lib/sops";
 
 export function TeachBrainModal({
@@ -21,7 +28,8 @@ export function TeachBrainModal({
   if (!isOpen) return null;
 
   const handleAddStep = () => setSteps((prev) => [...prev, ""]);
-  const handleRemoveStep = (idx: number) => setSteps((prev) => prev.filter((_, i) => i !== idx));
+  const handleRemoveStep = (idx: number) =>
+    setSteps((prev) => prev.filter((_, i) => i !== idx));
   const handleStepChange = (idx: number, val: string) => {
     setSteps((prev) => {
       const next = [...prev];
@@ -71,9 +79,12 @@ export function TeachBrainModal({
                 Tacit Knowledge Capture
               </span>
             </div>
-            <h2 className="text-[21px] font-semibold tracking-tight text-[#1d1d1f]">Teach Company Brain</h2>
+            <h2 className="text-[21px] font-semibold tracking-tight text-[#1d1d1f]">
+              Teach Company Brain
+            </h2>
             <p className="text-[12.5px] text-[#6e6e73]">
-              Directly contribute unwritten operational procedures, decision rules, and tacit domain know-how.
+              Directly contribute unwritten operational procedures, decision
+              rules, and tacit domain know-how.
             </p>
           </div>
           <button
@@ -86,7 +97,10 @@ export function TeachBrainModal({
           </button>
         </header>
 
-        <form onSubmit={handleSubmit} className="flex flex-1 flex-col overflow-hidden">
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-1 flex-col overflow-hidden"
+        >
           <div className="flex-1 space-y-4 overflow-y-auto p-6">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -204,7 +218,9 @@ export function TeachBrainModal({
               className="specular flex h-11 items-center gap-2 overflow-hidden rounded-lg border border-[#0071e3]/30 bg-[#0071e3] px-6 text-[13px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.25)] transition-transform duration-200 hover:-translate-y-0.5 active:scale-95 disabled:opacity-50"
             >
               <UserCheck className="h-4 w-4" />
-              {loading ? "Extracting & Indexing..." : "Synthesize into SOP Draft"}
+              {loading
+                ? "Extracting & Indexing..."
+                : "Synthesize into SOP Draft"}
             </button>
           </footer>
         </form>

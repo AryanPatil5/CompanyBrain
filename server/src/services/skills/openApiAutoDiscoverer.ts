@@ -1,5 +1,7 @@
+import { logger } from '../../logger.js';
 import { compileOpenApiSpec, CompiledSkill } from './openApiCompiler.js';
 import { supabase } from '../../config/supabase.js';
+import { ssrfSafeFetch } from '../security/ssrfGuard.js';
 
 export interface AutoDiscoverResult {
   toolsSynthesized: number;
@@ -20,7 +22,7 @@ export async function discoverAndSynthesizeToolsFromSpec(
   try {
     if (typeof specInput === 'string') {
       if (specInput.startsWith('http://') || specInput.startsWith('https://')) {
-        const response = await fetch(specInput, {
+        const response = await ssrfSafeFetch(specInput, {
           headers: { 'Accept': 'application/json, text/plain, */*' },
         });
         if (!response.ok) {
@@ -61,12 +63,12 @@ export async function discoverAndSynthesizeToolsFromSpec(
         );
         registeredToolNames.push(toolName);
       } catch (dbErr) {
-        console.warn(`[OpenApiAutoDiscoverer Warning] Failed to register tool "${toolName}" to DB:`, dbErr);
+        logger.warn(`[OpenApiAutoDiscoverer Warning] Failed to register tool "${toolName}" to DB:`, dbErr);
         registeredToolNames.push(toolName);
       }
     }
 
-    console.log(`[OpenApiAutoDiscoverer] Successfully synthesized and registered ${registeredToolNames.length} FastMCP tools.`);
+    logger.info(`[OpenApiAutoDiscoverer] Successfully synthesized and registered ${registeredToolNames.length} FastMCP tools.`);
 
     return {
       toolsSynthesized: registeredToolNames.length,
@@ -74,7 +76,7 @@ export async function discoverAndSynthesizeToolsFromSpec(
       status: 'success',
     };
   } catch (err: any) {
-    console.error('[OpenApiAutoDiscoverer Error] Spec synthesis failed:', err.message);
+    logger.error('[OpenApiAutoDiscoverer Error] Spec synthesis failed:', err.message);
     return {
       toolsSynthesized: 0,
       registeredToolNames: [],

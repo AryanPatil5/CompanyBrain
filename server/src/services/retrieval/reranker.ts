@@ -1,3 +1,4 @@
+import { logger } from '../../logger.js';
 export interface RerankedResult<T = any> {
   document: T;
   relevanceScore: number;
@@ -49,7 +50,7 @@ export async function rerankResults<T extends { title?: string; trigger_conditio
 
     return scoredDocs.slice(0, topN).map((item) => item.document);
   } catch (err) {
-    console.warn('[Reranker Warning] Cross-encoder reranking fallback:', err);
+    logger.warn('[Reranker Warning] Cross-encoder reranking fallback:', err);
     return documents.slice(0, topN);
   }
 }

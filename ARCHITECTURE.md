@@ -29,7 +29,7 @@ graph TB
     end
 
     subgraph "Data Layer"
-        Supabase[(Supabase PostgreSQL<br/>+ pgvector + Apache AGE)]
+        Supabase[(Supabase PostgreSQL<br/>+ pgvector + relational graph tables)]
         Redis[(Redis)]
     end
 
@@ -223,7 +223,7 @@ sequenceDiagram
     Connector->>Extractor: extractSOPFromThread(messages)
     Extractor->>AI Provider: LLM call with system prompt
     AI Provider-->>Extractor: ExtractedSOP JSON (Zod validated)
-    Extractor->>Graph: addEntityNode / createRelationship (Apache AGE)
+    Extractor->>Graph: addEntityNode / createRelationship (graph_nodes + graph_edges)
     Extractor->>Freshness: detectConflict(title, trigger, workspace)
     Freshness->>Supabase: match_sops_by_embedding RPC (pgvector)
     Freshness-->>Extractor: Conflict result (has_conflict, similarity)
@@ -431,7 +431,7 @@ flowchart TD
     L -->|Invalid or low confidence| N[Return null<br/>HTTP 200 'no valid SOP']
 
     M --> O[Graph Entity Extraction]
-    O --> P[addEntityNode + createRelationship<br/>Apache AGE / graph_nodes+graph_edges]
+    O --> P[addEntityNode + createRelationship<br/>graph_nodes + graph_edges]
 
     M --> Q[Conflict Detection]
     Q --> R[generateEmbedding title+trigger]
@@ -467,7 +467,7 @@ The ingestion pipeline supports 7 sources:
 3. **Extract SOP** → LLM call with `SOURCE_TRUST` context; Zod schema validation; confidence threshold 0.4
 4. **Detect conflict** → pgvector embedding search (threshold 0.75) + LLM verification
 5. **Store** → `skills_sops` (status=Draft, version=1) + `sop_versions` snapshot + `sop_citations` link
-6. **Graph** → Extract entities/relationships → `graph_nodes` + `graph_edges` (Apache AGE fallback)
+6. **Graph** → Extract entities/relationships → `graph_nodes` + `graph_edges` (relational system of record)
 
 ---
 
@@ -715,7 +715,7 @@ Migrations are applied in filename order. Key schema evolution:
 | `017_oauth_state_nonces.sql` | CSRF state nonce table |
 | `018_platform_oauth_config.sql` | Platform-level OAuth config with encrypted secrets |
 | `021_dlac_vector_search_function.sql` | `document_permissions` + `match_embeddings_dlac` RPC |
-| `022_apache_age_graph_schema.sql` | Apache AGE graph extension + relational fallback tables |
+| `022_apache_age_graph_schema.sql` | Relational knowledge graph tables (`graph_nodes` + `graph_edges`) |
 | `023_add_fulltext_search_index.sql` | Full-text search indexes |
 | `024_webhook_subscriptions.sql` | `webhook_subscriptions` for incremental sync |
 | `025_dlac_hnsw_prefilter.sql` | DLAC HNSW pre-filter optimization |
@@ -866,7 +866,7 @@ graph TB
     subgraph "localhost"
         Server[Company Brain Server<br/>Port 5001 REST + 8080 FastMCP]
         Client[TanStack Start Client<br/>Port 3000]
-        Postgres[Postgres + Apache AGE<br/>Port 5432]
+        Postgres[Postgres<br/>Port 5432]
         Redis[Redis<br/>Port 6379]
         Ollama[Ollama<br/>Port 11434]
     end
@@ -934,7 +934,7 @@ The following limitations are documented in `COMPANY_BRAIN_CRITICAL_REVIEW.md` a
 - **GitHub crawler**: No GitHub App token exchange for API crawl, code search, PR review threads, repos enumeration, org mapping, branch protections, Actions logs, or permissions
 
 ### 12.2 AI Pipeline Gaps
-- **Apache AGE**: Enabled in SQL but mostly unused; `executeCypher` RPC path is dead code; graph is primarily relational fallback tables (`graph_nodes` + `graph_edges`)
+- **Graph**: Relational `graph_nodes` + `graph_edges` are the system of record (Apache AGE retired in Phase 0); traversal + workspace scoping covered by `server/src/graph/algorithms.ts`
 - **OpenAPI skills**: `register_openapi_spec` returns `compiled_skill_dispatched` without real authenticated API execution
 - **Embeddings**: Fallback to deterministic pseudo-vectors when Ollama is offline; no real vector similarity in test environments
 - **Grounding guardrail**: Heuristic-based; LLM judge can fail closed on errors, blocking all execution
@@ -957,7 +957,7 @@ The following limitations are documented in `COMPANY_BRAIN_CRITICAL_REVIEW.md` a
 
 | Area | Issue | Impact |
 |---|---|---|
-| **Graph** | Apache AGE enabled but `executeCypher` is dead code; graph is relational fallback | Misleading architecture claims |
+| **Graph** | Apache AGE retired (Phase 0); relational `graph_nodes`/`graph_edges` are the system of record | Traversal is RPC-free; TS graph algorithms in `server/src/graph/algorithms.ts` |
 | **Skills** | OpenAPI auto-discovery returns `compiled_skill_dispatched` without real execution | No actual tool execution from specs |
 | **Tests** | No test framework; tests hit live services; ioredis retries forever without Redis | Tests hang or false-pass in CI |
 | **Embeddings** | Deterministic pseudo-vectors as fallback | Zero similarity in offline/test mode |
