@@ -6,6 +6,8 @@ const NAV: Array<{ id: NavTab; label: string; icon: any }> = [
   { id: "skills", label: "Skills Library", icon: Boxes },
   { id: "mcp", label: "FastMCP Network", icon: Network },
   { id: "integrations", label: "Integrations", icon: Plug },
+  { id: "graph", label: "Knowledge Graph", icon: Brain },
+  { id: "agents", label: "Agent Console", icon: Sparkles },
 ];
 
 export function GlassSidebar({
