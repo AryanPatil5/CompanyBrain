@@ -197,7 +197,10 @@ function mapBackendSopToFrontend(raw: any): Sop {
 export async function fetchSops(): Promise<{ sops: Sop[]; live: boolean }> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(
+      () => controller.abort(new Error("Request timed out after 8s")),
+      8000,
+    );
     const res = await fetch(`${API_BASE_URL}/api/sops`, {
       headers: {
         Authorization: `Bearer ${getToken()}`,
@@ -261,7 +264,10 @@ export async function confirmSopApi(id: string): Promise<boolean> {
 export async function fetchAnalytics(): Promise<Analytics | null> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(
+      () => controller.abort(new Error("Request timed out after 8s")),
+      8000,
+    );
     const res = await fetch(`${API_BASE_URL}/api/sops/analytics`, {
       headers: {
         Authorization: `Bearer ${getToken()}`,
