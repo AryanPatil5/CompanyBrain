@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { compileOpenApiSpec } from '../../src/services/skills/openApiCompiler.js';
 
 export async function runOpenApiCompilerTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running OpenAPI / Swagger Skill Compiler Test  ');
   console.log('=================================================');

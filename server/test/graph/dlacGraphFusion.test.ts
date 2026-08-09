@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { extractEntitiesAndTraverse } from '../../src/services/retrieval/graphFusion.js';
 import { addEntityNode, createRelationship } from '../../src/services/graph/graphService.js';
 
 export async function runDlacGraphFusionTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running DLAC Graph Fusion Access Control Test  ');
   console.log('=================================================');

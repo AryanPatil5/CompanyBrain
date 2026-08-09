@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { jwtAuth, generateTestToken } from '../../src/middleware/jwtAuth.js';
 import { enforceABAC } from '../../src/middleware/abacMiddleware.js';
 
 export async function runJwtAuthTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running JWKS JWT Authentication & ABAC Test Suite');
   console.log('=================================================');

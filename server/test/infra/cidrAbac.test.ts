@@ -1,3 +1,4 @@
+import { installHarness } from '../harness/index.js';
 import { isClientIpAllowed } from '../../src/middleware/abacMiddleware.js';
 
 /**
@@ -5,6 +6,7 @@ import { isClientIpAllowed } from '../../src/middleware/abacMiddleware.js';
  * Pure function tests — no infrastructure required.
  */
 export async function runCidrAbacTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running CIDR ABAC Matcher Test Suite          ');
   console.log('=================================================');

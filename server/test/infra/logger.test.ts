@@ -191,7 +191,9 @@ async function testHttpMiddlewarePropagation(): Promise<boolean> {
 
   const app = express();
   const lines: string[] = [];
-  const reqLogger = new StructuredLogger({ output: (line) => lines.push(line) });
+  // Pin the level explicitly: the hermetic harness sets LOG_LEVEL=warn, which
+  // would drop the probe handler's info log and make lines[0] undefined.
+  const reqLogger = new StructuredLogger({ output: (line) => lines.push(line), level: 'info' });
 
   app.use(correlationIdMiddleware());
   app.get('/probe', (_req: any, res: any) => {
@@ -215,7 +217,7 @@ async function testHttpMiddlewarePropagation(): Promise<boolean> {
   return success;
 }
 
-async function runLoggerTests(): Promise<boolean> {
+export async function runLoggerTests(): Promise<boolean> {
   const suites: Array<() => Promise<boolean>> = [
     testStructuredFields,
     testCorrelationPropagation,

@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import * as XLSX from 'xlsx';
 import { parsePdfWithLayout, parseSpreadsheet } from '../../src/services/parsers/layoutParser.js';
 
 export async function runLayoutParserTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Layout-Aware Document & Table Parser Test');
   console.log('=================================================');

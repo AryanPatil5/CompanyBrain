@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { logAuditEvent, AuditEvent } from '../../src/services/auditLogger.js';
 
 export async function runAuditLoggerTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running SIEM Structured Audit Logger Test     ');
   console.log('=================================================');

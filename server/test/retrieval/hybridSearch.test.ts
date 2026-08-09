@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { hybridSearch } from '../../src/services/retrieval/hybridSearch.js';
 
 export async function runHybridSearchTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running RRF Hybrid Search Integration Test Suite ');
   console.log('=================================================');

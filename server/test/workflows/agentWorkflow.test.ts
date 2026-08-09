@@ -1,3 +1,4 @@
+import { installHarness } from '../harness/index.js';
 import {
   planStepActivity,
   researchStepActivity,
@@ -6,6 +7,7 @@ import {
 } from '../../src/workflows/activities/agentActivities.js';
 
 export async function runAgentWorkflowTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Temporal.io Agent Workflow Test Suite ');
   console.log('=================================================');

@@ -14,11 +14,15 @@ export interface HttpDispatchResult {
  * Every request (and every redirect hop) passes the SSRF guard: private/loopback/
  * link-local ranges, cloud metadata endpoints, non-http(s) schemes, and DNS
  * rebinding targets are rejected before connecting.
+ *
+ * When `idempotencyKey` is supplied, the `Idempotency-Key` header is attached
+ * (ADR-T13) so stateful targets (Stripe, webhooks) can dedupe replays.
  */
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  retries: number = 1
+  retries: number = 1,
+  idempotencyKey?: string
 ): Promise<HttpDispatchResult> {
   let attempt = 0;
   let lastError: string = 'Unknown HTTP dispatch error';
@@ -29,8 +33,12 @@ async function fetchWithRetry(
     const timer = setTimeout(() => controller.abort(), 5000); // 5-second timeout
 
     try {
+      const headers = new Headers(options.headers ?? {});
+      if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
+
       const res = await ssrfSafeFetch(url, {
         ...options,
+        headers,
         signal: controller.signal,
       });
       clearTimeout(timer);
@@ -80,7 +88,8 @@ async function fetchWithRetry(
 export async function slackPostMessageAdapter(
   endpointConfig: any,
   parameters: any,
-  credentialRef?: string
+  credentialRef?: string,
+  idempotencyKey?: string
 ): Promise<HttpDispatchResult> {
   const isProd = process.env.NODE_ENV === 'production';
   const token = await resolveCredential(credentialRef || 'vault:slack_bot_token');
@@ -110,7 +119,7 @@ export async function slackPostMessageAdapter(
       'Content-Type': 'application/json; charset=utf-8',
     },
     body: JSON.stringify({ channel, text }),
-  });
+  }, 1, idempotencyKey);
 }
 
 /**
@@ -119,7 +128,8 @@ export async function slackPostMessageAdapter(
 export async function githubCommentAdapter(
   endpointConfig: any,
   parameters: any,
-  credentialRef?: string
+  credentialRef?: string,
+  idempotencyKey?: string
 ): Promise<HttpDispatchResult> {
   const isProd = process.env.NODE_ENV === 'production';
   const token = await resolveCredential(credentialRef || 'vault:github_pat');
@@ -155,7 +165,7 @@ export async function githubCommentAdapter(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ body }),
-  });
+  }, 1, idempotencyKey);
 }
 
 /**
@@ -164,7 +174,8 @@ export async function githubCommentAdapter(
 export async function stripeAdapter(
   endpointConfig: any,
   parameters: any,
-  credentialRef?: string
+  credentialRef?: string,
+  idempotencyKey?: string
 ): Promise<HttpDispatchResult> {
   const isProd = process.env.NODE_ENV === 'production';
   const token = await resolveCredential(credentialRef || 'vault:stripe_secret_key');
@@ -219,7 +230,7 @@ export async function stripeAdapter(
       'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: bodyParams.toString(),
-  });
+  }, 1, idempotencyKey);
 }
 
 /**
@@ -316,18 +327,19 @@ export async function dispatchStepExecution(
   targetSystem: string,
   endpointConfig: any,
   parameters: any,
-  credentialRef?: string
+  credentialRef?: string,
+  idempotencyKey?: string
 ): Promise<HttpDispatchResult> {
   const system = targetSystem.toLowerCase().trim();
 
   if (system === 'slack') {
-    return slackPostMessageAdapter(endpointConfig, parameters, credentialRef);
+    return slackPostMessageAdapter(endpointConfig, parameters, credentialRef, idempotencyKey);
   }
   if (system === 'github') {
-    return githubCommentAdapter(endpointConfig, parameters, credentialRef);
+    return githubCommentAdapter(endpointConfig, parameters, credentialRef, idempotencyKey);
   }
   if (system === 'stripe') {
-    return stripeAdapter(endpointConfig, parameters, credentialRef);
+    return stripeAdapter(endpointConfig, parameters, credentialRef, idempotencyKey);
   }
   if (system === 'postgres' || system === 'postgresql' || system === 'database') {
     return postgresAdapter(endpointConfig, parameters);

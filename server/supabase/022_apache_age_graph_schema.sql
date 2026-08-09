@@ -1,6 +1,6 @@
 -- ==========================================================
 -- Company Brain: Relational Knowledge Graph Schema
--- (Apache AGE removed in Phase 0 Task 3 — see 030_retire_apache_age.sql)
+-- (Apache AGE removed in Phase 0 Task 3 — see 032_retire_apache_age.sql)
 -- Run this in Supabase / PostgreSQL SQL Editor
 -- ==========================================================
 

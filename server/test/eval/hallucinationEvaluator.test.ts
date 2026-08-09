@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { evaluateGroundingScore, runBenchmarkEvaluationSuite } from '../../src/services/eval/hallucinationEvaluator.js';
 
 export async function runHallucinationEvaluatorTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running LLM-Graded Hallucination Eval Test   ');
   console.log('=================================================');

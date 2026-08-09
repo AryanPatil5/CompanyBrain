@@ -1,0 +1,231 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Deterministic exit codes: every job fails on the first failing step (default
+# Actions behavior) and pipes never mask failures (pipefail). Each job runs in
+# parallel with its own isolated checkout + dependency cache.
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  lint-server:
+    name: Lint (server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --prefix server
+      - run: npm run lint --prefix server
+
+  lint-client:
+    name: Lint (client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci --prefix client
+      - run: npm run lint --prefix client
+
+  typecheck-server:
+    name: Typecheck (server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --prefix server
+      - run: npm run typecheck --prefix server
+
+  typecheck-client:
+    name: Typecheck (client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci --prefix client
+      - run: npm run typecheck --prefix client
+
+  build-server:
+    name: Build (server) + reproducibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --prefix server
+      - name: Build once
+        run: npm run build --prefix server
+      - name: Snapshot build output checksums
+        run: find server/dist -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/build-a.sha
+      - name: Rebuild from clean tree
+        run: rm -rf server/dist && npm run build --prefix server
+      - name: Assert byte-identical artifacts (reproducible build)
+        run: |
+          find server/dist -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/build-b.sha
+          diff /tmp/build-a.sha /tmp/build-b.sha
+
+  build-client:
+    name: Build (client) + reproducibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci --prefix client
+      - name: Build once
+        run: npm run build --prefix client
+      - name: Snapshot build output checksums
+        run: find client/dist -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/build-a.sha
+      - name: Rebuild from clean tree
+        run: rm -rf client/dist && npm run build --prefix client
+      - name: Assert byte-identical artifacts (reproducible build)
+        run: |
+          find client/dist -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/build-b.sha
+          diff /tmp/build-a.sha /tmp/build-b.sha
+
+  test:
+    name: Hermetic test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --prefix server
+      - name: Run hermetic test runner (50 suites, no live infra)
+        run: npm test --prefix server
+
+  migrations:
+    name: Migration verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        # pgvector variant required: migrations 005+ create the `vector`
+        # extension (same image as docker-compose.yml).
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: brain_user
+          POSTGRES_PASSWORD: brain_password
+          POSTGRES_DB: company_brain
+        # 5433 avoids the preinstalled Postgres that Ubuntu runners run on 5432.
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U brain_user -d company_brain"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --prefix server
+      - name: Apply all migrations from scratch
+        run: npm run migrate
+        env:
+          DATABASE_URL: postgresql://brain_user:brain_password@localhost:5433/company_brain
+      - name: Assert zero pending migrations
+        run: |
+          npm run migrate:status > /tmp/mig-status.txt
+          grep -E "Status: [0-9]+ applied, 0 pending, [0-9]+ on disk" /tmp/mig-status.txt
+          grep -qE "\(none — schema is up to date\)" /tmp/mig-status.txt
+      - name: Assert idempotent re-run (no re-apply, no checksum mismatch)
+        run: |
+          npm run migrate > /tmp/mig-again.txt
+          grep -E "Done: 0 applied, [1-9][0-9]* already applied" /tmp/mig-again.txt
+        env:
+          DATABASE_URL: postgresql://brain_user:brain_password@localhost:5433/company_brain
+
+  helm:
+    name: Helm chart validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Azure/setup-helm@v5
+        with:
+          version: latest
+      - name: Lint chart
+        run: helm lint deploy/helm/company-brain
+      - name: Render chart templates
+        run: |
+          helm template company-brain deploy/helm/company-brain > /tmp/rendered.yaml
+          test -s /tmp/rendered.yaml
+
+  secrets:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_COMMENTS: false
+
+  dependencies:
+    name: Dependency vulnerability scan (npm audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Audit server dependencies
+        run: node scripts/ci-audit.mjs server
+      - name: Audit client dependencies
+        run: node scripts/ci-audit.mjs client

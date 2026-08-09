@@ -1,3 +1,4 @@
+import { installHarness } from '../harness/index.js';
 import { getKeyProvider, MemoryKeyProvider, EnvironmentKeyProvider, isProduction } from '../../src/services/security/keyProvider.js';
 import { encryptSecret, decryptSecret } from '../../src/services/security/kmsEncryption.js';
 
@@ -19,6 +20,7 @@ function clearEnv(): void {
 }
 
 export async function runKeyProviderTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running KeyProvider Mock-Credential Guard Suite');
   console.log('=================================================');

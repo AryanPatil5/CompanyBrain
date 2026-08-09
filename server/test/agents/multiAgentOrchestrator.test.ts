@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { runWorkflow } from '../../src/agents/orchestrator.js';
 
 export async function runMultiAgentOrchestratorTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Multi-Agent Orchestrator Test Suite   ');
   console.log('=================================================');

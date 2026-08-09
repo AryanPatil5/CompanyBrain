@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { isEdgeTemporallyValid, calculateTemporalDecayScore } from '../../src/services/graph/temporalGraphService.js';
 import { addEntityNode, createRelationship, getConnectedEntities } from '../../src/services/graph/graphService.js';
 
 export async function runTemporalGraphServiceTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Temporal Validity & Decay Graph Test  ');
   console.log('=================================================');

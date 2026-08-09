@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { validateTriple, compileAndValidateTriples, type GraphTriple } from '../../src/services/graph/ontologyCompiler.js';
 
 export async function runOntologyCompilerTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Ontology Compiler Test Suite          ');
   console.log('=================================================');

@@ -248,7 +248,7 @@ async function testClassApiPreserved(): Promise<boolean> {
   return success;
 }
 
-async function runCostMeterTests(): Promise<boolean> {
+export async function runCostMeterTests(): Promise<boolean> {
   const suites: Array<() => Promise<boolean>> = [
     testEstimateCost,
     testRecordUsagePersistsAllFields,

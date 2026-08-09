@@ -25,7 +25,7 @@ function check(name: string, condition: boolean, extra?: unknown): void {
   }
 }
 
-async function runOtelTests(): Promise<boolean> {
+export async function runOtelTests(): Promise<boolean> {
   const savedOtel = process.env.OTEL_ENABLED;
   delete process.env.OTEL_ENABLED;
 

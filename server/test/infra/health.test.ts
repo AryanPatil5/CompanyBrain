@@ -105,9 +105,19 @@ async function testCheckPostgresRefused(): Promise<boolean> {
 }
 
 async function testCheckSupabaseOffline(): Promise<boolean> {
+  // The hermetic harness replaces supabase with an in-memory store that never
+  // errors, so inject a failing client to exercise the offline path
+  // deterministically (mirrors the suite's injected-fake pattern for BullMQ).
+  const { supabase } = await import('../../src/config/supabase.js');
+  const originalFrom = supabase.from.bind(supabase);
+  supabase.from = (() => ({
+    select: () => ({ limit: async () => ({ data: null, error: { message: 'network error: offline' } }) }),
+  })) as any;
+
   const started = Date.now();
   const ok = await checkSupabase(500);
   const elapsed = Date.now() - started;
+  supabase.from = originalFrom as any;
   check('checkSupabase returns false without live Supabase', ok === false);
   check('checkSupabase is time-bounded', elapsed < 3000);
   return success;
@@ -220,7 +230,7 @@ async function testHealthServerHttp(): Promise<boolean> {
   return success;
 }
 
-async function runHealthTests(): Promise<boolean> {
+export async function runHealthTests(): Promise<boolean> {
   const suites: Array<() => Promise<boolean>> = [
     testWithTimeout,
     testBuildHealthPayload,

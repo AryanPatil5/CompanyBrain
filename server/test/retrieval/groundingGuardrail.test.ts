@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { rerankResults } from '../../src/services/retrieval/reranker.js';
 import { verifyAnswerGrounding } from '../../src/services/retrieval/groundingGuardrail.js';
 
 export async function runGroundingGuardrailTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Cross-Encoder Reranker & Grounding Test');
   console.log('=================================================');

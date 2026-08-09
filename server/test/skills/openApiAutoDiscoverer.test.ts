@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { discoverAndSynthesizeToolsFromSpec } from '../../src/services/skills/openApiAutoDiscoverer.js';
 
 export async function runOpenApiAutoDiscovererTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running OpenAPI Auto-Discovery & Tool Test   ');
   console.log('=================================================');

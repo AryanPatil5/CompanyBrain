@@ -107,6 +107,8 @@ export async function createRelationship(
         workspace_id: edge.workspace_id,
         allowed_roles: edge.allowed_roles,
         source_document_id: edge.source_document_id,
+        valid_from: properties.valid_from ?? undefined,
+        valid_until: properties.valid_until ?? undefined,
       },
       { onConflict: 'source_id, target_id, edge_type' }
     );

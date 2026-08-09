@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { executeSecurely, IsolationSecurityError } from '../../src/services/skills/secureSandboxEngine.js';
 
 export async function runSecureSandboxEngineTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Hardened Isolate Secure Sandbox Test   ');
   console.log('=================================================');

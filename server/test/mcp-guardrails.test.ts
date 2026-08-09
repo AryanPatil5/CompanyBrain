@@ -9,7 +9,7 @@ import { storeIntegrationCredential, getIntegrationCredential, encryptSecret, de
 import { getPlatformOAuthConfig } from '../src/routes/integrations.js';
 import { supabase } from '../src/config/supabase.js';
 
-async function runMcpGuardrailsTestSuite() {
+export async function runMcpGuardrailsTestSuite() {
   console.log("=================================================");
   console.log("  Running MCP Guardrails & Security Test Suite   ");
   console.log("=================================================");
@@ -1080,10 +1080,11 @@ async function runMcpGuardrailsTestSuite() {
   console.log(`Test Suite Summary: ${passed} Passed, ${failed} Failed.`);
   console.log("=================================================");
 
-  if (failed > 0) {
-    process.exit(1);
-  }
-  process.exit(0);
+  return failed === 0;
 }
 
-runMcpGuardrailsTestSuite();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  runMcpGuardrailsTestSuite().then((success) => {
+    process.exit(success ? 0 : 1);
+  });
+}

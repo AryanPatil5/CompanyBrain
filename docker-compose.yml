@@ -151,6 +151,24 @@ services:
         limits:
           memory: 512M
 
+  # One-shot migration runner (Phase 1). Applies server/supabase/*.sql in
+  # order against the `postgres` service and exits. Run with:
+  #   docker compose --profile migrations run --rm migrations
+  # Installs dependencies inside the container (Linux ABI — host node_modules
+  # are macOS-built and unusable here).
+  migrations:
+    image: node:22-alpine
+    profiles: ["migrations"]
+    working_dir: /app
+    volumes:
+      - ./server:/app
+    environment:
+      DATABASE_URL: postgresql://brain_user:brain_password@postgres:5432/company_brain
+    command: sh -c "npm ci --silent && npm run migrate"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
     driver: local

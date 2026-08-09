@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { executeInSandbox } from '../../src/services/skills/sandboxEngine.js';
 
 export async function runSandboxEngineTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Docker Sandbox Execution Engine Test   ');
   console.log('=================================================');
@@ -16,14 +18,18 @@ export async function runSandboxEngineTest(): Promise<boolean> {
   console.log(`✅ SANDBOX TEST PASSED: Python code executed safely (${pyRes.durationMs}ms) with stdout: "${pyRes.stdout}".`);
 
   // 2. Test Clean JavaScript Calculation
-  const jsCode = 'console.log("JS Sum:", 10 + 20 + 30)';
-  const jsRes = await executeInSandbox(jsCode, 'javascript', 5000);
+  if (process.env.SANDBOX_FORCE_LOCAL === 'true') {
+    console.log('⏭️  SANDBOX TEST SKIPPED: JavaScript sub-test requires Docker (SANDBOX_FORCE_LOCAL=true forces the python3 fallback).');
+  } else {
+    const jsCode = 'console.log("JS Sum:", 10 + 20 + 30)';
+    const jsRes = await executeInSandbox(jsCode, 'javascript', 5000);
 
-  if (jsRes.exitCode !== 0 || !jsRes.stdout.includes('60')) {
-    console.error('❌ SANDBOX TEST FAILED: JavaScript execution failed!', jsRes);
-    return false;
+    if (jsRes.exitCode !== 0 || !jsRes.stdout.includes('60')) {
+      console.error('❌ SANDBOX TEST FAILED: JavaScript execution failed!', jsRes);
+      return false;
+    }
+    console.log(`✅ SANDBOX TEST PASSED: JavaScript code executed safely (${jsRes.durationMs}ms) with stdout: "${jsRes.stdout}".`);
   }
-  console.log(`✅ SANDBOX TEST PASSED: JavaScript code executed safely (${jsRes.durationMs}ms) with stdout: "${jsRes.stdout}".`);
 
   // 3. Test Timeout Limit Force Termination
   const infiniteLoopCode = 'while True: pass';

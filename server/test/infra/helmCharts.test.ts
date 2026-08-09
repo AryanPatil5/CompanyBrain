@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import fs from 'fs';
 import path from 'path';
 
 export async function runHelmChartsTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Kubernetes Helm Chart Validation Test ');
   console.log('=================================================');

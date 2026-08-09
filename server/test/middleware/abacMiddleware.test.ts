@@ -1,3 +1,4 @@
+import { installHarness } from '../harness/index.js';
 import { enforceABAC, ABACPolicy } from '../../src/middleware/abacMiddleware.js';
 
 function makeRes() {
@@ -16,6 +17,7 @@ function makeRes() {
 }
 
 export async function runAbacMiddlewareTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running ABAC Access Control Middleware Test   ');
   console.log('=================================================');

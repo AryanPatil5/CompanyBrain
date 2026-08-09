@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { saveWorkflowState, getWorkflowState, updateStepStatus } from '../../src/agents/persistentStore.js';
 import { ExecutionResult } from '../../src/agents/types.js';
 
 export async function runPersistentStoreTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Agent Persistent Store Test Suite     ');
   console.log('=================================================');

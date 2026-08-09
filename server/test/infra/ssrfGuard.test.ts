@@ -1,3 +1,4 @@
+import { installHarness } from '../harness/index.js';
 import {
   validateOutboundUrl,
   validateOutboundTarget,
@@ -5,6 +6,7 @@ import {
   isPrivateOrBlockedIp,
   ssrfSafeFetch,
 } from '../../src/services/security/ssrfGuard.js';
+import { lookup } from 'node:dns/promises';
 
 /**
  * Phase 0: SSRF Guard test suite.
@@ -13,6 +15,7 @@ import {
  * integration with http_adapters and the OpenAPI auto-discoverer.
  */
 export async function runSsrfGuardTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running SSRF Guard Test Suite                 ');
   console.log('=================================================');
@@ -100,7 +103,32 @@ export async function runSsrfGuardTest(): Promise<boolean> {
   expectReject('localhost rejected before DNS', () => validateOutboundTarget('http://localhost:11434/'));
   expectReject('sub.localhost rejected', () => validateOutboundTarget('http://ollama.localhost/'));
   expectReject('Non-resolving host rejected (fail closed)', () => validateOutboundTarget('http://does-not-exist.invalid/'));
-  expectAllow('Public hostname allowed (resolved IPs validated)', () => validateOutboundTarget('https://example.com/'));
+  // The example.com assertion requires real DNS resolution (public hostname ->
+  // resolved public IPs validated). Skip it, instead of failing, when no
+  // resolver is reachable (hermetic/CI environments with no network).
+  let dnsAvailable = false;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('DNS probe timed out')), 2000);
+      lookup('example.com')
+        .then(() => {
+          clearTimeout(timer);
+          resolve();
+        })
+        .catch((err: unknown) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+    });
+    dnsAvailable = true;
+  } catch {
+    dnsAvailable = false;
+  }
+  if (dnsAvailable) {
+    expectAllow('Public hostname allowed (resolved IPs validated)', () => validateOutboundTarget('https://example.com/'));
+  } else {
+    console.log('⏭️  SSRF TEST SKIPPED: Public hostname DNS assertion skipped (no resolver reachable).');
+  }
 
   // ─── 8. Redirect target validation ───
   const base = new URL('https://example.com/start');

@@ -287,7 +287,7 @@ function makeFetchRouter() {
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-async function runSyncTest(): Promise<{ passed: number; failed: number }> {
+export async function runSyncTest(): Promise<{ passed: number; failed: number }> {
   let passed = 0;
   let failed = 0;
   const check = (label: string, cond: boolean, extra?: string) => {
@@ -301,6 +301,7 @@ async function runSyncTest(): Promise<{ passed: number; failed: number }> {
   };
 
   const { db, state } = makeFakeDb();
+  const originalFrom = (supabase as any).from;
   (supabase as any).from = db.from.bind(db);
 
   const originalFetch = global.fetch;
@@ -388,7 +389,7 @@ async function runSyncTest(): Promise<{ passed: number; failed: number }> {
     failed++;
     console.log(`  ❌ sync run threw: ${(err as Error).message}`);
   } finally {
-    (supabase as any).from = db.from.bind(db);
+    (supabase as any).from = originalFrom;
     global.fetch = originalFetch;
   }
 

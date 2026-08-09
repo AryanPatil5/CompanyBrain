@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { openfgaClientManager } from '../../src/services/security/openfgaClient.js';
 import { searchVectorContextDLAC } from '../../src/services/embeddings.js';
 
 export async function runDlacVectorSearchTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running DLAC OpenFGA HNSW Vector Search Test ');
   console.log('=================================================');

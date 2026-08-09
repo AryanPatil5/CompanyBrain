@@ -690,9 +690,13 @@ erDiagram
     }
 ```
 
-### Migration Order (applied manually in Supabase SQL Editor)
+### Migration Order (applied by the runner)
 
-Migrations are applied in filename order. Key schema evolution:
+Migrations are applied in filename order by `npm run migrate`
+(`server/src/db/migrator.ts`, ADR-T1), which tracks applied state in
+`schema_migrations` (version, applied_at, checksum) and refuses
+checksum-differing re-applies or duplicate version numbers. The same files can
+be run manually in the Supabase SQL Editor. Key schema evolution:
 
 | Migration | Purpose |
 |---|---|
@@ -721,8 +725,16 @@ Migrations are applied in filename order. Key schema evolution:
 | `025_dlac_hnsw_prefilter.sql` | DLAC HNSW pre-filter optimization |
 | `026_temporal_graph_schema.sql` | Temporal graph schema |
 | `027_source_documents_chunks_and_schema_repairs.sql` | `source_documents` + `document_chunks` tables |
-| `028_fix_migration_order.sql` | Fix migration ordering issues |
+| `029_foundation_hardening.sql` | Drop dead AGE RPC, graph traversal index, `usage_meters` |
 | `030_github_connector.sql` | GitHub connector: `github_repositories`, `github_sync_state`, `github_indexed_documents` (RLS, SHA-based change detection) |
+| `031_usage_meters_detail.sql` | Per-LLM-request detail columns on `usage_meters` |
+| `032_retire_apache_age.sql` | Drop the Apache AGE extension (ADR-T4) |
+
+> Historical note: `028_fix_migration_order.sql` was deleted in Phase 1 (Task 2)
+> — it existed only to band-aid the 013 ordering bug, which is fixed directly in
+> `013_rls_hardening_remaining_tables.sql`. The duplicate-numbering collision
+> (`030_github_connector` + `030_retire_apache_age`) was resolved by renaming
+> the latter to `032_retire_apache_age.sql`.
 
 ---
 

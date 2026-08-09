@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { enforceOpenFGA, openfgaClientManager } from '../../src/middleware/openfgaMiddleware.js';
 
 export async function runOpenFGAEngineTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running OpenFGA ReBAC PDP Middleware Test Suite');
   console.log('=================================================');

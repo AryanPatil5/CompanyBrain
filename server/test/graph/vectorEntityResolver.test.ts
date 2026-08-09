@@ -1,3 +1,4 @@
+import { installHarness } from '../harness/index.js';
 import {
   findSimilarEntities,
   registerEntityVector,
@@ -10,6 +11,7 @@ import {
 } from '../../src/services/graph/graphService.js';
 
 export async function runVectorEntityResolverTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Vector Entity Resolution & Merge Test ');
   console.log('=================================================');

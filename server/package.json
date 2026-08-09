@@ -13,11 +13,13 @@
     "dev:temporal-worker": "PROCESSES=temporal-worker tsx watch src/bootstrap.ts",
     "build": "tsc",
     "start": "node dist/bootstrap.js",
-    "test": "tsx test/mcp-guardrails.test.ts",
+    "test": "tsx test/run-all.ts",
     "test:e2e": "NODE_ENV=test tsx test/e2e/companyBrain.e2e.test.ts",
-    "lint": "eslint src test scripts",
+    "lint": "eslint src test",
     "typecheck": "tsc --noEmit",
-    "migrate": "node scripts/migrate.mjs",
+    "migrate": "tsx src/db/migrator.ts",
+    "migrate:status": "tsx src/db/migrator.ts status",
+    "migrate:rollback": "tsx src/db/migrator.ts rollback-last",
     "clean": "rm -rf dist"
   },
   "dependencies": {

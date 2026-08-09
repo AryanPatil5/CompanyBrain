@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { parseDocument } from '../../src/services/parsers/documentParser.ts';
 
 export async function runDocumentParserTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Layout-Aware Document Parser Test Suite');
   console.log('=================================================');

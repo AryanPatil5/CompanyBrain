@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { startTraceSpan, recordMetric, getPrometheusMetricsString } from '../../src/middleware/telemetry.js';
 
 export async function runTelemetryTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running OpenTelemetry & Prometheus Test Suite  ');
   console.log('=================================================');

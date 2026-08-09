@@ -1,0 +1,31 @@
+# Gitleaks configuration for Company Brain.
+#
+# Allowlist entries below are deliberate, auditable exclusions:
+#  1. Logger redaction test fixtures (server/test/infra/logger.test.ts) feed
+#     FAKE secrets (fake JWTs, webhook URLs, PEMs, API keys) into the redactor
+#     on purpose — they are the redaction test vectors.
+#  2. server/test/security/keyProvider.test.ts contains a fake KMS master key
+#     test vector.
+#  3. README.md curl examples use <token> placeholders inside -H headers.
+#  4. commits eb5289ed/ca15f0c6 contain DEFAULT_DEV_MASTER_KEY_HEX, a dev-only
+#     fallback key that was REMOVED from the code in bec4b8c (env-driven keys
+#     only). It survives only in git history; rewriting history is out of scope
+#     and the key never shipped as a runtime default.
+#
+# Anything not matching these exclusions fails CI. Adding an allowlist entry
+# requires a justification comment.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Deliberate test fixtures, doc placeholders, and a removed dev-only fallback key"
+paths = [
+  '''server/test/infra/logger\.test\.ts''',
+  '''server/test/security/keyProvider\.test\.ts''',
+  '''README\.md''',
+]
+commits = [
+  'eb5289ed949ade38cd3063ee51cb999bdc754afd',
+  'ca15f0c682d68a544db0d197ff2e49e201fc8c16',
+]

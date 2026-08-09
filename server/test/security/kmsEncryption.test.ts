@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { encryptSecret, decryptSecret, EncryptedPayload } from '../../src/services/security/kmsEncryption.js';
 
 export async function runKmsEncryptionTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running KMS AES-256-GCM Encryption Test Suite ');
   console.log('=================================================');
@@ -41,7 +43,10 @@ export async function runKmsEncryptionTest(): Promise<boolean> {
   // 3. Test Tamper Resistance (GCM authTag validation failure)
   const tamperedPayload: EncryptedPayload = {
     ...encryptedPayload,
-    cipherText: encryptedPayload.cipherText.replace(/[0-9a-f]/, '0'),
+    // Flip the first hex nibble to a guaranteed-different value so the
+    // ciphertext is ALWAYS modified (replace(/[0-9a-f]/, '0') is a no-op when
+    // the first character is already '0', which made this flaky).
+    cipherText: encryptedPayload.cipherText.replace(/^[0-9a-f]/, (c) => (c === '0' ? '1' : '0')),
   };
 
   try {

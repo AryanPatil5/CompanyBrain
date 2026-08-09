@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { selfHealAndRetryCode, repairExecutableCode } from '../../src/services/skills/toolSelfHealer.js';
 
 export async function runToolSelfHealerTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Tool Self-Healer Sandbox Retry Test ');
   console.log('=================================================');

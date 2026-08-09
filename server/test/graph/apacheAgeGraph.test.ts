@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { addEntityNode, createRelationship, getConnectedEntities } from '../../src/services/graph/graphService.js';
 
 export async function runApacheAgeGraphTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Relational Knowledge Graph Integration Test Suite');
   console.log('=================================================');

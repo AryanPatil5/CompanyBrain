@@ -1,3 +1,4 @@
+import { installHarness } from '../harness/index.js';
 import {
   observabilityMiddleware,
   recordAgentExecution,
@@ -6,11 +7,17 @@ import {
 } from '../../src/middleware/observability.js';
 
 export async function runObservabilityTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Observability & Metrics Middleware Test');
   console.log('=================================================');
 
-  // 1. Test Agent Execution & Token Usage Recording
+  // 1. Test Agent Execution & Token Usage Recording.
+  // The registry is module-global and shared with earlier suites, so assert on
+  // deltas relative to the pre-test snapshot. getMetricsSnapshot returns the
+  // live registry, so clone it to freeze the baseline.
+  const before = structuredClone(getMetricsSnapshot());
+
   recordAgentExecution('COMPLETED');
   recordAgentExecution('AWAITING_APPROVAL');
   recordTokenUsage('google', 150, 45);
@@ -47,12 +54,19 @@ export async function runObservabilityTest(): Promise<boolean> {
     return false;
   }
 
-  if (snapshot.agents.executions.COMPLETED !== 1 || snapshot.agents.executions.AWAITING_APPROVAL !== 1) {
+  const beforeCounts = before.agents?.executions ?? {};
+  if (
+    snapshot.agents.executions.COMPLETED - (beforeCounts.COMPLETED ?? 0) !== 1 ||
+    snapshot.agents.executions.AWAITING_APPROVAL - (beforeCounts.AWAITING_APPROVAL ?? 0) !== 1
+  ) {
     console.error('❌ OBSERVABILITY TEST FAILED: Agent execution counts mismatch!', snapshot.agents);
     return false;
   }
 
-  if (snapshot.llm.token_usage.google.input !== 150 || snapshot.llm.token_usage.openrouter.output !== 80) {
+  if (
+    snapshot.llm.token_usage.google.input - (before.llm?.token_usage?.google?.input ?? 0) !== 150 ||
+    snapshot.llm.token_usage.openrouter.output - (before.llm?.token_usage?.openrouter?.output ?? 0) !== 80
+  ) {
     console.error('❌ OBSERVABILITY TEST FAILED: Token usage metrics mismatch!', snapshot.llm);
     return false;
   }

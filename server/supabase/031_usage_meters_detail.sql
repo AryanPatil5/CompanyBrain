@@ -16,7 +16,3 @@ ALTER TABLE usage_meters
 
 CREATE INDEX IF NOT EXISTS idx_usage_meters_workspace_period
     ON usage_meters (workspace_id, period DESC);
-
-INSERT INTO schema_migrations (version, applied_at, checksum)
-VALUES ('031', NOW(), 'usage_meters_detail')
-ON CONFLICT (version) DO NOTHING;

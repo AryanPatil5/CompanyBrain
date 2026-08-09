@@ -47,6 +47,13 @@ create policy "Tenant isolation policy on execution_logs"
   );
 
 -- 4. Enable RLS and add tenant-scoped policies for crawled_sources and ingestion_failures
+-- Ordering fix (Phase 1 Task 2): the tenant policy below references
+-- workspace_id, but the column was previously only added by a later migration
+-- (027). Add it here so 013 is self-contained and applies on a clean database.
+alter table public.crawled_sources
+  add column if not exists workspace_id text not null default '00000000-0000-0000-0000-000000000000';
+create index if not exists idx_crawled_sources_workspace on public.crawled_sources(workspace_id);
+
 alter table public.crawled_sources enable row level security;
 drop policy if exists "Service role full access on crawled_sources" on public.crawled_sources;
 drop policy if exists "Tenant isolation policy on crawled_sources" on public.crawled_sources;

@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { canonicalizeEntity, disambiguateTriple } from '../../src/services/graph/entityDisambiguator.js';
 import { GraphTriple } from '../../src/services/graph/ontologyCompiler.js';
 
 export async function runEntityDisambiguatorTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Entity Disambiguator Test Suite       ');
   console.log('=================================================');

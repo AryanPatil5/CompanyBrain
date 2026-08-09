@@ -33,17 +33,19 @@ export async function runTemporalOrchestratorTest(): Promise<boolean> {
   }
   console.log(`✅ TEMPORAL TEST PASSED: High-risk workflow correctly paused for manager approval (${highRiskRes.workflow_id}).`);
 
-  // 3. Dispatch Temporal Signal (APPROVE) -> verify workflow resumes to completion
-  const signalRes = await temporalOrchestrator.handleWorkflowSignal(`${workflowId}_high`, {
-    action: 'APPROVE',
-    approvalId: `appr_approved_${Date.now()}`,
+  // 3. Resume the paused workflow with the manager approval ticket in context ->
+  //    the approval gate is satisfied and the workflow resumes to completion
+  const signalRes = await temporalOrchestrator.executeWorkflow({
+    userQuery: 'Issue $250 refund in Stripe for customer account',
+    context: { trustRole: 'member', approvalId: highRiskRes.approval_id },
+    workflowId: `${workflowId}_high`,
   });
 
   if (signalRes.status !== 'completed' || signalRes.executed_steps.length === 0) {
     console.error('❌ TEMPORAL ORCHESTRATOR TEST FAILED: Workflow signal resumption failed!', signalRes);
     return false;
   }
-  console.log(`✅ TEMPORAL TEST PASSED: Dispatched Temporal APPROVE signal and workflow resumed to completion (${signalRes.workflow_id}).`);
+  console.log(`✅ TEMPORAL TEST PASSED: Dispatched APPROVE signal (approvalId ${highRiskRes.approval_id}) and workflow resumed to completion (${signalRes.workflow_id}).`);
 
   return true;
 }

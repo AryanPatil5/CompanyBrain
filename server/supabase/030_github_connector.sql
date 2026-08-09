@@ -115,8 +115,3 @@ create policy "Tenant isolation policy on github_indexed_documents"
   with check (
     workspace_id = current_setting('request.jwt.claims', true)::json->>'workspace_id'
   );
-
--- schema_migrations compatibility note
-insert into schema_migrations (version, applied_at, checksum)
-values ('030', now(), 'github_connector')
-on conflict (version) do nothing;

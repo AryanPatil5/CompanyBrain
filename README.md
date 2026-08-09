@@ -65,25 +65,20 @@ OPENROUTER_API_KEY=your_openrouter_key
 
 *Note: User authentication is handled natively by Supabase Auth session tokens. OAuth tokens are encrypted at rest using AES-256-GCM (`VAULT_SECRET_KEY`). Generate a secret key via `openssl rand -hex 32`.*
 
-Run database migrations in Supabase SQL Editor:
-1. `server/supabase/create_skills_sops.sql`
-2. `server/supabase/create_raw_threads_and_citations.sql`
-3. `server/supabase/003_versioning_and_logs.sql`
-4. `server/supabase/004_enterprise_guardrails_and_rbac.sql`
-5. `server/supabase/005_ingestion_failures_and_embeddings.sql`
-6. `server/supabase/006_crawled_sources_table.sql`
-7. `server/supabase/007_tool_registry.sql`
-8. `server/supabase/008_rls_hardening_and_vector_precision.sql`
-9. `server/supabase/009_agent_registry.sql`
-10. `server/supabase/010_single_use_approvals.sql`
-11. `server/supabase/011_remove_workspace_bypass.sql`
-12. `server/supabase/012_integration_installations.sql`
-13. `server/supabase/013_rls_hardening_remaining_tables.sql`
-14. `server/supabase/014_user_workspace_roles.sql`
-15. `server/supabase/015_custom_access_token_hook.sql`
-16. `server/supabase/016_integration_credentials.sql`
-17. `server/supabase/017_oauth_state_nonces.sql`
-18. `server/supabase/018_platform_oauth_config.sql`
+Run database migrations with the migration runner (ADR-T1) — it applies
+`server/supabase/*.sql` in filename order against Postgres, tracks applied
+state in `schema_migrations`, and re-runs are no-ops:
+
+```bash
+npm run migrate --prefix server                  # local Postgres (docker compose)
+npm run migrate:status --prefix server           # applied/pending state
+docker compose --profile migrations run --rm migrations   # one-shot container run
+```
+
+On Supabase cloud, apply the same files with the runner (`DATABASE_URL` set to
+the Supabase pooler DSN) or paste them into the SQL Editor in order — but the
+runner ledger is the source of truth. Migrations are additive: never edit an
+applied file; add a new numbered one.
 
 #### Custom Access Token Hook Setup (Supabase Dashboard)
 1. Go to **Supabase Dashboard** -> **Authentication** -> **Hooks (Beta)**.

@@ -5,7 +5,9 @@
 DROP FUNCTION IF EXISTS execute_cypher_query;
 
 -- Add graph traversal index for performance in relational graph system-of-record
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_graph_edges_workspace_source_target
+-- (plain CREATE INDEX: CONCURRENTLY cannot run inside the runner's
+-- per-file transaction; the table is new so no lock contention exists)
+CREATE INDEX IF NOT EXISTS idx_graph_edges_workspace_source_target
 ON graph_edges (workspace_id, source_id, target_id);
 
 -- Create usage_meters table for cost tracking (ADR-T12 scaffold pulled forward)
@@ -19,9 +21,3 @@ CREATE TABLE IF NOT EXISTS usage_meters (
     alert_threshold INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
-
--- Add schema_migrations compatibility notes
--- This ensures migration runner can track Phase 0 migrations
-INSERT INTO schema_migrations (version, applied_at, checksum)
-VALUES ('029', NOW(), 'foundation_hardening')
-ON CONFLICT (version) DO NOTHING;

@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { routeCompletion } from '../../src/services/modelRouter.js';
 
 export async function runModelRouterTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Enterprise Model Router Test Suite     ');
   console.log('=================================================');

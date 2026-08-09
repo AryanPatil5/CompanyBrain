@@ -1,6 +1,8 @@
+import { installHarness } from '../harness/index.js';
 import { transitionState } from '../../src/agents/stateMachine.js';
 
 export async function runStateMachineTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running Workflow State Machine Governor Test   ');
   console.log('=================================================');

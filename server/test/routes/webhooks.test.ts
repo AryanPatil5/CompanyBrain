@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import crypto from 'node:crypto';
 import { verifyWebhookSignature, processWebhookEvent } from '../../src/services/ingestion/webhookService.js';
 
 export async function runWebhooksRouteTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running High-Throughput Webhooks & HMAC Test  ');
   console.log('=================================================');

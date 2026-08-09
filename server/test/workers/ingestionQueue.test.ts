@@ -1,7 +1,9 @@
+import { installHarness } from '../harness/index.js';
 import { parseRetryAfterHeader, calculateExponentialBackoff, handleRateLimitResponse } from '../../src/queue/rateLimiter.js';
 import { createIngestionWorker } from '../../src/workers/ingestionWorker.js';
 
 export async function runIngestionQueueTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running BullMQ Ingestion Queue & Backoff Test ');
   console.log('=================================================');

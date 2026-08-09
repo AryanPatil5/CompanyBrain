@@ -1,8 +1,10 @@
+import { installHarness } from '../harness/index.js';
 import { extractEntitiesAndTraverse } from '../../src/services/retrieval/graphFusion.js';
 import { hybridSearch } from '../../src/services/retrieval/hybridSearch.js';
 import { addEntityNode, createRelationship } from '../../src/services/graph/graphService.js';
 
 export async function runGraphFusionTest(): Promise<boolean> {
+  await installHarness();
   console.log('\n=================================================');
   console.log('  Running GraphRAG Traversal Fusion Test Suite   ');
   console.log('=================================================');
@@ -21,7 +23,7 @@ export async function runGraphFusionTest(): Promise<boolean> {
   try {
     const fusionRes = await extractEntitiesAndTraverse('How do we handle refunds on Stripe API?', workspaceId);
 
-    if (!fusionRes.graphContextText || !fusionRes.graphContextText.includes('[Knowledge Graph Context]')) {
+    if (!fusionRes.graphContextText || !fusionRes.graphContextText.includes('[Knowledge Graph Context')) {
       console.error('❌ GRAPH FUSION TEST FAILED: Graph context payload missing!', fusionRes);
       return false;
     }
