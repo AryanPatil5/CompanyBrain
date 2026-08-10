@@ -515,10 +515,16 @@ export async function generateText(prompt: string, systemPrompt?: string, option
   });
 
   const raceController = new AbortController();
-  const attempts = enabled.map((provider, index) => {
-    const attempt = withRetry(provider, adapters.get(provider)!, raceController.signal).then((result) => ({ provider, result }));
+  const attempts = enabled.map(async (provider, index) => {
     const startDelayMs = index * CONFIG.staggerMs;
-    return startDelayMs > 0 ? sleep(startDelayMs).then(() => attempt) : attempt;
+    if (startDelayMs > 0) {
+      await sleep(startDelayMs);
+    }
+    if (raceController.signal.aborted) {
+      throw new ProviderError(provider, `${provider} request cancelled`, { retryable: false });
+    }
+    const result = await withRetry(provider, adapters.get(provider)!, raceController.signal);
+    return { provider, result };
   });
 
   try {

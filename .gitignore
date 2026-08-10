@@ -16,8 +16,12 @@ build/
 !.env.example
 *.pem
 
-# Logs
+# Logs & Runtime
 *.log
+*.pid
+**/*.pid
+pid.*
+**/pid.*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
