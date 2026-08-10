@@ -1,14 +1,21 @@
 import { Router, Request, Response } from 'express';
 import { verifyWebhookSignature } from '../services/ingestion/webhookService.js';
-import { webhookIngestionQueue } from '../queue/ingestionQueue.js';
+import { normalizeSlack, normalizeSlackEvent } from '../services/connectors.js';
+import { ingestWebhookEvent } from '../ingestion/webhookPipeline.js';
+import { extractWebhookEventTimestamp } from '../services/ingestion/webhookService.js';
 import { createGithubWebhookHandler } from '../connectors/github/webhook.js';
 import { logger } from '../logger.js';
 
 const router = Router();
 
+const DEV_DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
+
 /**
- * Event-Driven Webhook Route Handler for GitHub & Slack
- * Validates HMAC SHA-256 signatures and pushes payloads to BullMQ queue in <200ms.
+ * Event-Driven Webhook Route Handler for GitHub & Slack.
+ * Validates HMAC SHA-256 signatures. Slack deliveries run through the
+ * canonical durable webhook pipeline (raw_source_events -> webhook-ingestion
+ * queue -> webhook worker) so the consumer only ever sees the canonical
+ * { eventId, workspaceId } job payload.
  */
 router.post('/:provider', async (req: Request, res: Response): Promise<void> => {
   const startTime = Date.now();
@@ -51,7 +58,7 @@ router.post('/:provider', async (req: Request, res: Response): Promise<void> => 
     (req.headers['x-slack-event-id'] as string) ||
     `deliv_${Date.now()}`;
 
-  const workspaceId = (req.headers['x-workspace-id'] as string) || '00000000-0000-0000-0000-000000000000';
+  const workspaceId = (req.headers['x-workspace-id'] as string) || DEV_DEFAULT_WORKSPACE_ID;
 
   // GitHub webhooks are dispatched through the GitHub connector so events are
   // parsed into sync jobs on the github-sync queue (consumed by githubSyncWorker).
@@ -82,33 +89,49 @@ router.post('/:provider', async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  // Push raw payload to BullMQ webhook-ingestion queue asynchronously
-  try {
-    await webhookIngestionQueue.add(
-      `webhook_${provider}_event`,
-      {
-        provider,
-        deliveryId,
-        workspaceId,
-        eventTimestamp: new Date().toISOString(),
-        payload: req.body,
-      },
-      {
-        jobId: `wh_${deliveryId}`,
-      }
-    );
-  } catch (err: any) {
-    logger.warn('[Webhooks Route Warning] Redis queue push fallback:', err.message);
+  // Slack: normalize (custom ThreadPayload envelope first, real Slack Events
+  // API payloads second), then hand off to the durable pipeline.
+  const normalized = normalizeSlack(req.body) ?? normalizeSlackEvent(req.body, workspaceId);
+  if (!normalized) {
+    // Non-SOP Slack events (channel joins, message deletions, etc.): ack so
+    // Slack does not retry, but ingest nothing.
+    const durationMs = Date.now() - startTime;
+    res.status(200).json({
+      status: 'ok',
+      message: 'Event acknowledged, nothing to ingest.',
+      provider,
+      deliveryId,
+      durationMs,
+    });
+    return;
   }
 
-  const durationMs = Date.now() - startTime;
-  res.status(200).json({
-    status: 'ok',
-    message: 'Webhook payload received and queued.',
-    provider,
-    deliveryId,
-    durationMs,
-  });
+  try {
+    const result = await ingestWebhookEvent({
+      workspaceId,
+      provider: 'slack',
+      source: 'slack',
+      externalId: normalized.external_thread_id,
+      eventTimestamp: extractWebhookEventTimestamp('slack', req.body),
+      rawPayload: req.body,
+      normalizedPayload: normalized,
+      sourceTrust: 'crawled',
+    });
+
+    const durationMs = Date.now() - startTime;
+    res.status(202).json({
+      status: 'ok',
+      message: 'Webhook payload received and queued.',
+      provider,
+      deliveryId,
+      event_id: result.eventId,
+      event_status: result.status,
+      durationMs,
+    });
+  } catch (err: any) {
+    logger.error('[Webhooks Route Error] Failed to ingest Slack event:', err);
+    res.status(500).json({ error: 'Internal server error during ingestion.' });
+  }
 });
 
 export default router;

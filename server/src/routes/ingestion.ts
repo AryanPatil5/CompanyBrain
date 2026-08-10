@@ -1,7 +1,6 @@
 import { logger } from '../logger.js';
 import { Router, Request, Response } from 'express';
 import { supabase } from '../config/supabase.js';
-import { extractSOPFromThread } from '../services/extractor.js';
 import {
   normalizeSlack,
   normalizeGitHub,
@@ -10,9 +9,7 @@ import {
   normalizeEmail,
   normalizeDatabase,
   normalizeDirectTeach,
-  type ThreadPayload,
 } from '../services/connectors.js';
-import { detectConflict, createVersion } from '../services/freshness.js';
 import {
   verifySlackSignature,
   verifyGitHubSignature,
@@ -22,305 +19,180 @@ import {
   resolveLinearWorkspaceMiddleware,
 } from './connectors.js';
 import { authenticate, type AuthenticatedRequest } from '../middleware/auth.js';
-import { generateEmbedding, recordEmbeddingFailure } from '../services/embeddings.js';
-import { getTenantClient } from '../middleware/tenantClient.js';
 import { ingestionLimiter, webhookLimiter } from '../middleware/rateLimiter.js';
 import { ingestionQueue } from '../queue/ingestionQueue.js';
 import { type IngestionJobData } from '../workers/ingestionWorker.js';
-import { formatMessagesAsTranscript, persistSourceDocumentWithChunks } from '../ingestion/sourceObjects.js';
+import { ingestWebhookEvent } from '../ingestion/webhookPipeline.js';
+import { extractWebhookEventTimestamp } from '../services/ingestion/webhookService.js';
 
 const router = Router();
 
-async function processThread(
-  payload: ThreadPayload,
-  res: Response,
-  req?: Request,
-  sourceTrust: 'manual' | 'crawled' = 'crawled'
-): Promise<void> {
-  const { workspace_id, source, external_thread_id, channel_or_project, messages } = payload;
-  const client = req ? getTenantClient(req) : supabase;
+// ─── Webhook Routes (durable pipeline, Phase 2 Task 1) ─────────────
+// Every accepted delivery is first persisted to `raw_source_events`
+// (dedupe-keyed, at-least-once -> exactly-once recording) and then handed to
+// the webhook consumer via `webhook-ingestion`. The API answers 202 with the
+// durable `event_id` immediately; status can be polled at
+// GET /api/ingestion/events/:event_id.
 
-  logger.info(`[Ingestion] Received ${source} webhook (trust: ${sourceTrust}) for thread/source: ${external_thread_id}`);
+async function acceptWebhookEvent(req: Request, res: Response, input: {
+  provider: string;
+  source: string;
+  sourceTrust: 'manual' | 'crawled';
+  normalized: ReturnType<typeof normalizeSlack> | null;
+  rawBody: unknown;
+}): Promise<void> {
+  const { provider, source, sourceTrust, normalized, rawBody } = input;
+  if (!normalized) {
+    res.status(400).json({ error: 'Invalid payload: missing required parameters or invalid messages format.' });
+    return;
+  }
 
-  // Store raw thread
-  const { data: rawThread, error: rawErr } = await client
-    .from('raw_threads')
-    .upsert({
-      workspace_id,
+  try {
+    const result = await ingestWebhookEvent({
+      workspaceId: normalized.workspace_id,
+      provider,
       source,
-      external_thread_id,
-      channel_or_project,
-      raw_content: messages,
-      is_processed: false,
-    }, { onConflict: 'workspace_id, source, external_thread_id' })
-    .select()
-    .single();
-
-  if (rawErr) {
-    logger.error('[Ingestion Error] Failed to store raw thread:', rawErr);
-    res.status(500).json({ error: 'Database storage error for raw thread.' });
-    return;
-  }
-
-  const sourceDocument = await persistSourceDocumentWithChunks({
-    workspaceId: workspace_id,
-    source,
-    externalId: external_thread_id,
-    title: `${source}:${channel_or_project}:${external_thread_id}`,
-    text: formatMessagesAsTranscript(messages),
-    rawThreadId: rawThread.id,
-    metadata: {
-      channel_or_project,
-      message_count: messages.length,
-      source_trust: sourceTrust,
-    },
-    client,
-  });
-
-  // Extract SOP via LLM with error handling and sourceTrust parameter
-  let extractedSOP;
-  try {
-    extractedSOP = await extractSOPFromThread(messages, workspace_id, source, sourceTrust);
-  } catch {
-    res.status(422).json({
-      success: false,
-      error: 'SOP extraction failed schema validation',
-    });
-    return;
-  }
-
-  if (!extractedSOP) {
-    res.status(200).json({
-      message: 'Source payload processed, but no valid high-confidence SOP was identified.',
-      raw_thread_id: rawThread.id,
-    });
-    return;
-  }
-
-  // Conflict detection — check if this SOP duplicates an existing one using pgvector
-  const conflict = await detectConflict(
-    extractedSOP.title,
-    extractedSOP.trigger_condition,
-    workspace_id
-  );
-
-  if (conflict.has_conflict && conflict.matching_sop_id) {
-    logger.info(`[Ingestion] Conflict detected with SOP "${conflict.matching_sop_title}" (similarity: ${conflict.similarity_score})`);
-
-    await supabase.from('sop_citations').insert({
-      sop_id: conflict.matching_sop_id,
-      raw_thread_id: rawThread.id,
+      externalId: normalized.external_thread_id,
+      eventTimestamp: extractWebhookEventTimestamp(provider, rawBody),
+      rawPayload: rawBody,
+      normalizedPayload: normalized,
+      sourceTrust,
     });
 
-    await supabase.from('raw_threads').update({ is_processed: true }).eq('id', rawThread.id);
-
-    res.status(200).json({
-      message: 'Payload processed. Duplicate/conflict detected with an existing SOP — linked as additional evidence.',
-      conflict: {
-        existing_sop_id: conflict.matching_sop_id,
-        existing_sop_title: conflict.matching_sop_title,
-        similarity_score: conflict.similarity_score,
-        summary: conflict.conflict_summary,
-      },
-      raw_thread_id: rawThread.id,
+    res.status(202).json({
+      success: true,
+      event_id: result.eventId,
+      status: result.status,
+      message: result.replayed
+        ? 'Duplicate delivery acknowledged — event already processed.'
+        : result.status === 'queued'
+          ? 'Webhook event accepted and queued for processing.'
+          : 'Webhook event accepted. Processing will resume automatically.',
     });
-    return;
-  }
-
-  // Generate vector embedding for the SOP — never insert an SOP without one.
-  // On failure, mark the ingestion state and rethrow so the webhook fails loudly
-  // (and is retried by the sender / queue).
-  let sopEmbedding: number[] | null = null;
-  try {
-    sopEmbedding = await generateEmbedding(`${extractedSOP.title}: ${extractedSOP.trigger_condition}`);
-  } catch (embErr) {
-    await recordEmbeddingFailure({
-      workspaceId: workspace_id,
-      source,
-      rawContent: `${extractedSOP.title}: ${extractedSOP.trigger_condition}`,
-      error: embErr,
-    });
-    throw embErr;
-  }
-
-  // Save as Draft SOP with Risk Level, Human Gate Policy, and vector embedding
-  const insertPayload: Record<string, any> = {
-    workspace_id,
-    title: extractedSOP.title,
-    category: extractedSOP.category,
-    trigger_condition: extractedSOP.trigger_condition,
-    preconditions: extractedSOP.preconditions,
-    execution_steps: extractedSOP.execution_steps,
-    risk_level: extractedSOP.risk_level || 'Low',
-    requires_human_gate: extractedSOP.requires_human_gate || false,
-    source_doc_id: sourceDocument?.id || rawThread.id,
-    status: 'Draft',
-    version: 1,
-    last_confirmed_at: new Date().toISOString(),
-    is_stale: false,
-  };
-
-  if (sopEmbedding) {
-    insertPayload.embedding = sopEmbedding;
-  }
-
-  let { data: sopData, error: sopErr } = await supabase
-    .from('skills_sops')
-    .insert(insertPayload)
-    .select()
-    .single();
-
-  if (sopErr && (sopErr.message.includes('embedding') || sopErr.message.includes('risk_level') || sopErr.message.includes('column'))) {
-    logger.warn('[Ingestion Warning] Column missing in schema, inserting without extended vector/risk columns.');
-    delete insertPayload.embedding;
-    delete insertPayload.risk_level;
-    delete insertPayload.requires_human_gate;
-
-    const retry = await supabase
-      .from('skills_sops')
-      .insert(insertPayload)
-      .select()
-      .single();
-
-    sopData = retry.data;
-    sopErr = retry.error;
-  }
-
-  if (sopErr || !sopData) {
-    logger.error('[Ingestion Error] Failed to store SOP draft:', sopErr);
-    res.status(500).json({ error: 'Failed to create SOP record.' });
-    return;
-  }
-
-  // Create initial version snapshot
-  await createVersion(sopData.id, 'system', 'initial_extraction');
-
-  // Citation link
-  await supabase.from('sop_citations').insert({
-    sop_id: sopData.id,
-    raw_thread_id: rawThread.id,
-  });
-
-  await supabase.from('raw_threads').update({ is_processed: true }).eq('id', rawThread.id);
-
-  logger.info(`[Ingestion Success] Created Draft SOP "${sopData.title}" (ID: ${sopData.id}) [Risk: ${sopData.risk_level}]`);
-
-  res.status(201).json({
-    message: 'SOP draft successfully generated and linked.',
-    sop: sopData,
-  });
-}
-
-// ─── Webhook Routes ──────────────────────────────────────────
-
-// ─── Webhook Routes ──────────────────────────────────────────
-
-router.post('/webhook', verifySlackSignature, resolveSlackWorkspaceMiddleware(), webhookLimiter, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const payload = normalizeSlack(req.body);
-    if (!payload) {
-      res.status(400).json({ error: 'Missing required payload parameters or invalid messages format.' });
-      return;
-    }
-    await processThread(payload, res, req, 'crawled');
   } catch (error) {
-    logger.error('[Ingestion Error]:', error);
+    logger.error(`[Ingestion Error] ${source} webhook acceptance failed:`, error);
     res.status(500).json({ error: 'Internal server error during ingestion.' });
   }
+}
+
+router.post('/webhook', verifySlackSignature, resolveSlackWorkspaceMiddleware(), webhookLimiter, async (req: Request, res: Response): Promise<void> => {
+  await acceptWebhookEvent(req, res, {
+    provider: 'slack',
+    source: 'slack',
+    sourceTrust: 'crawled',
+    normalized: normalizeSlack(req.body),
+    rawBody: req.body,
+  });
 });
 
 router.post('/webhook/github', verifyGitHubSignature, resolveGitHubWorkspaceMiddleware(), webhookLimiter, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const payload = normalizeGitHub(req.body);
-    if (!payload) {
-      res.status(400).json({ error: 'Invalid GitHub payload.' });
-      return;
-    }
-    await processThread(payload, res, req, 'crawled');
-  } catch {
-    res.status(500).json({ error: 'Internal server error during GitHub ingestion.' });
-  }
+  await acceptWebhookEvent(req, res, {
+    provider: 'github',
+    source: 'github',
+    sourceTrust: 'crawled',
+    normalized: normalizeGitHub(req.body),
+    rawBody: req.body,
+  });
 });
 
 router.post('/webhook/linear', verifyLinearSignature, resolveLinearWorkspaceMiddleware(), webhookLimiter, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const payload = normalizeLinear(req.body);
-    if (!payload) {
-      res.status(400).json({ error: 'Invalid Linear payload.' });
-      return;
-    }
-    await processThread(payload, res, req, 'crawled');
-  } catch {
-    res.status(500).json({ error: 'Internal server error during Linear ingestion.' });
-  }
+  await acceptWebhookEvent(req, res, {
+    provider: 'linear',
+    source: 'linear',
+    sourceTrust: 'crawled',
+    normalized: normalizeLinear(req.body),
+    rawBody: req.body,
+  });
 });
 
 router.post('/webhook/zendesk', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const user = (req as AuthenticatedRequest).user!;
-    const payload = normalizeZendesk({
-      ...req.body,
-      workspace_id: user.workspace_id
-    });
-    if (!payload) {
-      res.status(400).json({ error: 'Invalid Zendesk support payload.' });
-      return;
-    }
-    await processThread(payload, res, req, 'crawled');
-  } catch {
-    res.status(500).json({ error: 'Internal server error during Zendesk ingestion.' });
-  }
+  const user = (req as AuthenticatedRequest).user!;
+  await acceptWebhookEvent(req, res, {
+    provider: 'zendesk',
+    source: 'zendesk',
+    sourceTrust: 'crawled',
+    normalized: normalizeZendesk({ ...req.body, workspace_id: user.workspace_id }),
+    rawBody: req.body,
+  });
 });
 
 router.post('/webhook/email', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const user = (req as AuthenticatedRequest).user!;
-    const payload = normalizeEmail({
-      ...req.body,
-      workspace_id: user.workspace_id
-    });
-    if (!payload) {
-      res.status(400).json({ error: 'Invalid email payload.' });
-      return;
-    }
-    await processThread(payload, res, req, 'crawled');
-  } catch {
-    res.status(500).json({ error: 'Internal server error during Email ingestion.' });
-  }
+  const user = (req as AuthenticatedRequest).user!;
+  await acceptWebhookEvent(req, res, {
+    provider: 'email',
+    source: 'email',
+    sourceTrust: 'crawled',
+    normalized: normalizeEmail({ ...req.body, workspace_id: user.workspace_id }),
+    rawBody: req.body,
+  });
 });
 
 router.post('/webhook/database', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
-  try {
-    const user = (req as AuthenticatedRequest).user!;
-    const payload = normalizeDatabase({
-      ...req.body,
-      workspace_id: user.workspace_id
-    });
-    if (!payload) {
-      res.status(400).json({ error: 'Invalid database runbook payload.' });
-      return;
-    }
-    await processThread(payload, res, req, 'crawled');
-  } catch {
-    res.status(500).json({ error: 'Internal server error during Database ingestion.' });
-  }
+  const user = (req as AuthenticatedRequest).user!;
+  await acceptWebhookEvent(req, res, {
+    provider: 'database',
+    source: 'database',
+    sourceTrust: 'crawled',
+    normalized: normalizeDatabase({ ...req.body, workspace_id: user.workspace_id }),
+    rawBody: req.body,
+  });
 });
 
 router.post('/webhook/teach', authenticate, ingestionLimiter, async (req: Request, res: Response): Promise<void> => {
+  const user = (req as AuthenticatedRequest).user!;
+  await acceptWebhookEvent(req, res, {
+    provider: 'teach',
+    source: 'teach',
+    sourceTrust: 'manual',
+    normalized: normalizeDirectTeach({ ...req.body, workspace_id: user.workspace_id }),
+    rawBody: req.body,
+  });
+});
+
+// Durable event status endpoint (Phase 2 Task 1): polls the raw_source_events
+// ledger row for a previously accepted webhook delivery.
+router.get('/events/:eventId', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const user = (req as AuthenticatedRequest).user!;
-    const payload = normalizeDirectTeach({
-      ...req.body,
-      workspace_id: user.workspace_id
-    });
-    if (!payload) {
-      res.status(400).json({ error: 'Invalid tacit knowledge payload. Ensure title and description are provided.' });
+    const { data, error } = await supabase
+      .from('raw_source_events')
+      .select('*')
+      .eq('id', req.params.eventId)
+      .maybeSingle();
+
+    if (error) {
+      logger.error('[Ingestion Error] Failed to read webhook event:', error);
+      res.status(500).json({ error: 'Internal server error fetching webhook event.' });
       return;
     }
-    await processThread(payload, res, req, 'manual');
+
+    if (!data) {
+      res.status(404).json({ error: 'Webhook event not found.' });
+      return;
+    }
+
+    if (data.workspace_id !== user.workspace_id) {
+      res.status(404).json({ error: 'Webhook event not found.' });
+      return;
+    }
+
+    res.json({
+      event_id: data.id,
+      status: data.status,
+      provider: data.provider,
+      source: data.source,
+      external_id: data.external_id,
+      event_timestamp: data.event_timestamp,
+      source_trust: data.source_trust,
+      resulting_thread_id: data.resulting_thread_id,
+      sop_id: data.sop_id,
+      error_message: data.error_message,
+      created_at: data.created_at,
+      processed_at: data.processed_at,
+    });
   } catch (error) {
-    logger.error('[Direct Teach Ingestion Error]:', error);
-    res.status(500).json({ error: 'Internal server error during Tacit Knowledge ingestion.' });
+    logger.error('[Ingestion Error] Webhook event status lookup failed:', error);
+    res.status(500).json({ error: 'Internal server error fetching webhook event.' });
   }
 });
 

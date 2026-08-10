@@ -18,6 +18,8 @@ import {
   startHealthServer,
 } from '../services/health.js';
 import { ingestionQueue } from '../queue/ingestionQueue.js';
+import { processWebhookEventJob, recoverStaleWebhookEvents, DEFAULT_STALE_EVENT_TIMEOUT_MS } from '../ingestion/webhookPipeline.js';
+import { updateEventStatus } from '../services/ingestion/webhookService.js';
 
 export interface IngestionJobData {
   job_name: 'crawl_slack' | 'crawl_github' | 'crawl_linear' | 'crawl_zendesk' | 'crawl_email' | 'crawl_db' | 'all';
@@ -27,10 +29,18 @@ export interface IngestionJobData {
   target_system?: string;
 }
 
+export interface WebhookEventJobData {
+  eventId: string;
+  workspaceId: string;
+}
+
 let workerInstance: Worker<IngestionJobData> | null = null;
+let webhookWorkerInstance: Worker<WebhookEventJobData> | null = null;
+let webhookSweepTimer: NodeJS.Timeout | null = null;
 
 // Dead-Letter Queue (DLQ) for failed ingestion tasks requiring manual inspection
 export const dlqQueue = new Queue<IngestionJobData>('ingestion-dlq', { connection: redisConnection });
+export const webhookDlqQueue = new Queue<WebhookEventJobData>('webhook-ingestion-dlq', { connection: redisConnection });
 
 async function logJobLifecycle(params: {
   jobId: string;
@@ -211,11 +221,178 @@ export function isIngestionWorkerRunning(): boolean {
   return workerInstance !== null && workerInstance.isRunning();
 }
 
+/**
+ * Webhook consumer worker (Phase 2 Task 1): drains `webhook-ingestion` jobs
+ * enqueued by the durable pipeline. Each job processes the persisted
+ * raw_source_events row exactly-once (event status + Phase 1 idempotency
+ * ledger), so provider redeliveries and Redis-outage recovery never produce
+ * duplicate SOPs. Runs inside the `ingestion-worker` process.
+ */
+export function createWebhookEventWorker(): Worker<WebhookEventJobData> {
+  const worker = new Worker<WebhookEventJobData>(
+    'webhook-ingestion',
+    async (job: Job<WebhookEventJobData>) => {
+      const { eventId, workspaceId } = job.data;
+      const span = startTraceSpan('BullMQ Webhook Event', { jobId: job.id, eventId, workspaceId });
+      const startTime = Date.now();
+
+      logger.info(`[WebhookWorker] Processing event ${eventId} for workspace ${workspaceId}... (Attempt #${job.attemptsMade + 1})`);
+      await logJobLifecycle({ jobId: job.id!, jobName: 'webhook_event', workspaceId, status: 'started' });
+
+      const result = await processWebhookEventJob({
+        eventId,
+        workspaceId,
+        // BullMQ v6 semantics (verified against node_modules/bullmq): inside
+        // the processor `job.attemptsMade` counts COMPLETED attempts before
+        // this one, and it is incremented by moveToFinished BEFORE the
+        // 'failed' event fires. So the current attempt number is
+        // `attemptsMade + 1` and `attemptsMade + 1 >= attempts` marks the
+        // final attempt (the 'failed' handler then routes to the DLQ).
+        attempts: { made: job.attemptsMade + 1, max: job.opts.attempts || 3 },
+      });
+
+      await logJobLifecycle({
+        jobId: job.id!,
+        jobName: 'webhook_event',
+        workspaceId,
+        status: 'completed',
+        result,
+      });
+
+      span.end('ok');
+      recordMetric('webhook_event_latency_ms', Date.now() - startTime, { eventId, workspaceId });
+      return result;
+    },
+    {
+      connection: redisConnection,
+      concurrency: 3,
+    }
+  );
+
+  worker.on('completed', (job) => {
+    logger.info(`[WebhookWorker] Event job ${job.id} (${job.data.eventId}) completed.`);
+  });
+
+  worker.on('failed', async (job, err) => {
+    logger.error(`[WebhookWorker] Event job ${job?.id} (${job?.data?.eventId}) failed:`, err.message);
+
+    if (job) {
+      const maxAttempts = job.opts.attempts || 3;
+      try {
+        if (job.attemptsMade >= maxAttempts) {
+          // Attempts are genuinely exhausted (bullmq v6 increments
+          // attemptsMade in moveToFinished BEFORE emitting 'failed', so
+          // attemptsMade >= attempts here means this was the last try).
+          // Preserve the failed state and route the job to the DLQ.
+          await updateEventStatus(job.data.eventId, {
+            status: 'failed',
+            error_message: err.message,
+          }, job.data.workspaceId);
+          logger.warn(`[WebhookWorker] Event job ${job.id} reached maximum retries. Routing to webhook-ingestion-dlq...`);
+          try {
+            await webhookDlqQueue.add('dlq_failed_webhook_event', job.data, { jobId: `dlq_${job.id}` });
+            await logJobLifecycle({
+              jobId: job.id!,
+              jobName: 'webhook_event',
+              workspaceId: job.data.workspaceId,
+              status: 'dlq_routed',
+              error: `Max retries exhausted: ${err.message}`,
+            });
+          } catch (dlqErr: any) {
+            logger.error('[WebhookWorker Error] Failed to push to webhook DLQ:', dlqErr.message);
+          }
+        } else {
+          // BullMQ will retry this job. The pipeline's catch deliberately
+          // leaves the event 'processing' on a transient failure — reset it
+          // to 'queued' so the next attempt can atomically re-claim it and
+          // actually re-run the work (instead of skipping a terminal event).
+          await updateEventStatus(job.data.eventId, { status: 'queued', error_message: null }, job.data.workspaceId);
+          await logJobLifecycle({
+            jobId: job.id!,
+            jobName: 'webhook_event',
+            workspaceId: job.data.workspaceId,
+            status: 'failed',
+            error: err.message,
+          });
+        }
+      } catch (statusErr) {
+        logger.warn('[WebhookWorker Warning] Failed to update event status:', statusErr);
+      }
+    }
+  });
+
+  worker.on('error', (err) => {
+    if ((err as any).code === 'ECONNREFUSED') {
+      // Suppress offline Redis dev message
+    } else {
+      logger.error('[WebhookWorker Error]:', err);
+    }
+  });
+
+  return worker;
+}
+
+export function isWebhookEventWorkerRunning(): boolean {
+  return webhookWorkerInstance !== null && webhookWorkerInstance.isRunning();
+}
+
+export function startWebhookEventWorker(): Worker<WebhookEventJobData> {
+  if (!webhookWorkerInstance) {
+    logger.info('[WebhookWorker] Starting BullMQ webhook event worker (Concurrency: 3)...');
+    webhookWorkerInstance = createWebhookEventWorker();
+  }
+
+  // Stale-event recovery sweep (Phase 2 Task 1): periodically re-claims
+  // events stranded in `received`/`processing` beyond the stale timeout
+  // (worker crash, lost status update, Redis outage at enqueue time) and
+  // re-enqueues the canonical { eventId, workspaceId } job. Timings are
+  // env-overridable; the timer never keeps the process alive by itself.
+  if (!webhookSweepTimer) {
+    const staleTimeoutMs = parseInt(process.env.WEBHOOK_STALE_EVENT_TIMEOUT_MS || String(DEFAULT_STALE_EVENT_TIMEOUT_MS), 10);
+    const sweepIntervalMs = parseInt(process.env.WEBHOOK_STALE_SWEEP_INTERVAL_MS || '60000', 10);
+    let sweeping = false;
+    webhookSweepTimer = setInterval(() => {
+      if (sweeping) return;
+      sweeping = true;
+      void (async () => {
+        try {
+          const result = await recoverStaleWebhookEvents({ staleAfterMs: staleTimeoutMs });
+          if (result.recovered > 0 || result.failed > 0) {
+            logger.info(
+              `[WebhookWorker] Stale event sweep: ${result.recovered} recovered, ${result.skipped} skipped (worker alive), ${result.failed} failed.`,
+            );
+          }
+        } catch (err) {
+          logger.warn('[WebhookWorker Warning] Stale event sweep failed:', err);
+        } finally {
+          sweeping = false;
+        }
+      })();
+    }, sweepIntervalMs);
+    webhookSweepTimer.unref();
+  }
+
+  return webhookWorkerInstance;
+}
+
+export async function stopWebhookEventWorker(): Promise<void> {
+  if (webhookSweepTimer) {
+    clearInterval(webhookSweepTimer);
+    webhookSweepTimer = null;
+  }
+  if (webhookWorkerInstance) {
+    logger.info('[WebhookWorker] Stopping webhook event worker...');
+    await webhookWorkerInstance.close();
+    webhookWorkerInstance = null;
+  }
+}
+
 export function startIngestionWorker(): Worker<IngestionJobData> {
   if (!workerInstance) {
     logger.info('[IngestionWorker] Starting BullMQ Ingestion Worker (Concurrency: 5, Rate Limiter: 100/min)...');
     workerInstance = createIngestionWorker();
   }
+  startWebhookEventWorker();
   const healthPort = parseInt(process.env.INGESTION_WORKER_HEALTH_PORT || '5004', 10);
   startHealthServer('ingestion-worker', healthPort, {
     checks: {
@@ -224,13 +401,18 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
     },
     details: async () => {
       const queue = await checkBullMQQueueCounts(ingestionQueue);
-      return { workerRunning: isIngestionWorkerRunning(), queue: queue || 'unknown' };
+      return {
+        workerRunning: isIngestionWorkerRunning() && isWebhookEventWorkerRunning(),
+        webhookWorkerRunning: isWebhookEventWorkerRunning(),
+        queue: queue || 'unknown',
+      };
     },
   });
   return workerInstance;
 }
 
 export async function stopIngestionWorker(): Promise<void> {
+  await stopWebhookEventWorker();
   if (workerInstance) {
     logger.info('[IngestionWorker] Stopping BullMQ Ingestion Worker...');
     await workerInstance.close();

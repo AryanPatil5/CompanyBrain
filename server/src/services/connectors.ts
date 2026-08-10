@@ -3,12 +3,31 @@
  * Supports: Slack, GitHub, Linear, Zendesk, Inbound Email, Database Schemas, and Direct Tacit Knowledge ("Teach the Brain").
  */
 
+import crypto from 'node:crypto';
+
 export interface ThreadPayload {
   workspace_id: string;
   source: 'slack' | 'github' | 'linear' | 'zendesk' | 'email' | 'database' | 'direct_teach';
   external_thread_id: string;
   channel_or_project: string;
   messages: Array<{ user: string; text: string; timestamp?: string }>;
+}
+
+/**
+ * Deterministic fallback identity for webhook deliveries whose provider does
+ * not supply a stable external/event id (email, database, teach and the
+ * custom ThreadPayload "envelope" webhooks). Hashing the canonical payload
+ * means identical deliveries always produce the same id — and therefore the
+ * same dedupe key — instead of a fresh Date.now()-based identity per
+ * delivery (which would defeat webhook dedupe entirely).
+ */
+function stableFallbackId(prefix: string, canonical: unknown): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update(JSON.stringify(canonical ?? {}))
+    .digest('hex')
+    .slice(0, 24);
+  return `${prefix}-${digest}`;
 }
 
 /**
@@ -35,6 +54,35 @@ export function normalizeSlack(body: any): ThreadPayload | null {
 }
 
 /**
+ * Normalize a real Slack Events API delivery ({team_id, event: {...}}) into a
+ * ThreadPayload. Slack's API posts no workspace_id/messages envelope, so the
+ * workspace is resolved from the request (x-workspace-id header) by the
+ * caller. Message events carry `ts`; replies carry `thread_ts` (which maps
+ * every reply onto the parent thread). Events without a message text (channel
+ * joins, etc.) normalize to null — they are acknowledged, not ingested.
+ */
+export function normalizeSlackEvent(body: any, workspaceId: string): ThreadPayload | null {
+  const event = body?.event;
+  if (!event || !event.ts) return null;
+  const text = event.text ?? event.message?.text;
+  if (!text) return null;
+  const threadRef = event.thread_ts || event.ts;
+  return {
+    workspace_id: workspaceId,
+    source: 'slack',
+    external_thread_id: `slack:${event.channel ?? 'unknown'}:${threadRef}`,
+    channel_or_project: event.channel ?? 'general',
+    messages: [
+      {
+        user: event.user ?? event.message?.user ?? 'Unknown',
+        text,
+        timestamp: event.ts,
+      },
+    ],
+  };
+}
+
+/**
  * Normalize a GitHub Issues/PR webhook payload.
  */
 export function normalizeGitHub(body: any): ThreadPayload | null {
@@ -42,7 +90,7 @@ export function normalizeGitHub(body: any): ThreadPayload | null {
     return {
       workspace_id: body.workspace_id,
       source: 'github',
-      external_thread_id: body.external_thread_id || `gh-${Date.now()}`,
+      external_thread_id: body.external_thread_id || stableFallbackId('gh', body.messages),
       channel_or_project: body.channel_or_project || body.repository || 'unknown-repo',
       messages: body.messages.map((m: any) => ({
         user: m.user || 'Unknown',
@@ -107,7 +155,7 @@ export function normalizeLinear(body: any): ThreadPayload | null {
     return {
       workspace_id: body.workspace_id,
       source: 'linear',
-      external_thread_id: body.external_thread_id || `lin-${Date.now()}`,
+      external_thread_id: body.external_thread_id || stableFallbackId('lin', body.messages),
       channel_or_project: body.channel_or_project || body.team || 'unknown-team',
       messages: body.messages.map((m: any) => ({
         user: m.user || 'Unknown',
@@ -121,7 +169,7 @@ export function normalizeLinear(body: any): ThreadPayload | null {
   const workspaceId = body.workspace_id;
   if (!workspaceId) return null;
   const teamKey = data.team?.key || data.teamId || 'unknown-team';
-  const issueId = data.id || data.issueId || `lin-${Date.now()}`;
+  const issueId = data.id || data.issueId || stableFallbackId('lin', data);
   const threadId = `lin-${issueId}`;
 
   const messages: ThreadPayload['messages'] = [];
@@ -171,7 +219,7 @@ export function normalizeZendesk(body: any): ThreadPayload | null {
     return {
       workspace_id: body.workspace_id,
       source: 'zendesk',
-      external_thread_id: body.external_thread_id || `zen-${Date.now()}`,
+      external_thread_id: body.external_thread_id || stableFallbackId('zen', body.messages),
       channel_or_project: body.channel_or_project || body.group || 'customer-support',
       messages: body.messages.map((m: any) => ({
         user: m.user || 'Agent/Customer',
@@ -231,7 +279,7 @@ export function normalizeEmail(body: any): ThreadPayload | null {
     return {
       workspace_id,
       source: 'email',
-      external_thread_id: external_thread_id || `email-${Date.now()}`,
+      external_thread_id: external_thread_id || stableFallbackId('email', { subject, from, messages }),
       channel_or_project: subject || 'inbox',
       messages: messages.map((m: any) => ({
         user: m.user || m.from || 'Sender',
@@ -246,7 +294,7 @@ export function normalizeEmail(body: any): ThreadPayload | null {
   return {
     workspace_id,
     source: 'email',
-    external_thread_id: external_thread_id || `email-${Date.now()}`,
+    external_thread_id: external_thread_id || stableFallbackId('email', { subject, from, body: body.body ?? body.text }),
     channel_or_project: subject || 'inbox',
     messages: [
       {
@@ -269,7 +317,7 @@ export function normalizeDatabase(body: any): ThreadPayload | null {
     return {
       workspace_id,
       source: 'database',
-      external_thread_id: body.external_thread_id || `db-${Date.now()}`,
+      external_thread_id: body.external_thread_id || stableFallbackId('db', body.messages),
       channel_or_project: database_name || 'postgres',
       messages: body.messages,
     };
@@ -280,7 +328,7 @@ export function normalizeDatabase(body: any): ThreadPayload | null {
   return {
     workspace_id,
     source: 'database',
-    external_thread_id: `db-${database_name || 'main'}-${Date.now()}`,
+    external_thread_id: stableFallbackId('db', { database_name, runbook_name, notes, queries }),
     channel_or_project: database_name || 'postgres',
     messages: [
       {
@@ -306,7 +354,7 @@ export function normalizeDirectTeach(body: any): ThreadPayload | null {
   return {
     workspace_id,
     source: 'direct_teach',
-    external_thread_id: `teach-${Date.now()}`,
+    external_thread_id: stableFallbackId('teach', { title, category, author, description, steps }),
     channel_or_project: category || 'Tacit Knowledge',
     messages: [
       {

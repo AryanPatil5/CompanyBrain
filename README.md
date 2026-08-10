@@ -196,6 +196,35 @@ curl -X POST http://localhost:5001/api/v1/webhooks/github \
 
 Send payloads or trigger webhooks across 7 supported sources:
 
+> **Durable webhook semantics (Phase 2 Task 1):** every accepted delivery is
+> first persisted to `raw_source_events` (dedupe-keyed by
+> workspace + provider + external_id + event timestamp), then processed
+> asynchronously by the `webhook-ingestion` worker. Webhook routes answer
+> `202` immediately with the durable `event_id`; the LLM/SOP work happens in
+> the background and status can be polled at
+> `GET /api/ingestion/events/:event_id`:
+>
+> ```bash
+> curl -X POST http://localhost:5001/api/ingestion/webhook \
+>   -H "Content-Type: application/json" \
+>   -d '{...}' \
+>   -w "\n%{http_code}\n"        # 202 {"success":true,"event_id":"<uuid>","status":"queued","message":"..."}
+>
+> curl http://localhost:5001/api/ingestion/events/<uuid> \
+>   -H "Authorization: Bearer <session-or-mock token>"
+> # {"event_id":"<uuid>","status":"completed|failed|queued|received","source":"slack",
+> #  "external_id":"...","resulting_thread_id":"...","sop_id":"...","error_message":null,...}
+> ```
+>
+> Redeliveries of the same event (same provider `external_id` + event
+> timestamp) return the **same** `event_id` with `status: "duplicate"` and are
+> never processed twice — the dedupe key is enforced by a unique index, and
+> the consumer is additionally guarded by the Phase 1 idempotency ledger.
+> If a delivery is accepted while the queue is unavailable it stays
+> `status: "received"` and the next redelivery (or worker sweep) retries it
+> automatically; webhook acceptance never fails because the queue is down.
+
+
 ### 1. Slack
 ```bash
 curl -X POST http://localhost:5001/api/ingestion/webhook \

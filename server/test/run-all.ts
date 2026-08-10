@@ -76,6 +76,7 @@ const SUITES: SuiteEntry[] = [
   { name: 'skills/openApiCompiler', file: './skills/openApiCompiler.test.js', run: 'runOpenApiCompilerTest', timeoutMs: 120_000 },
   { name: 'eval/hallucinationEvaluator', file: './eval/hallucinationEvaluator.test.js', run: 'runHallucinationEvaluatorTest', timeoutMs: 120_000 },
   { name: 'routes/webhooks', file: './routes/webhooks.test.js', run: 'runWebhooksRouteTest', timeoutMs: 120_000 },
+  { name: 'connectors/webhookDurability', file: './connectors/webhookDurability.test.js', run: 'runWebhookDurabilityTest', timeoutMs: 120_000 },
   { name: 'services/auditLogger', file: './services/auditLogger.test.js', run: 'runAuditLoggerTest', timeoutMs: 120_000 },
   { name: 'services/modelRouter', file: './services/modelRouter.test.js', run: 'runModelRouterTest', timeoutMs: 120_000 },
   { name: 'db/schemaContract', file: './db/schemaContract.test.js', run: 'runSchemaContractTest', timeoutMs: 120_000 },

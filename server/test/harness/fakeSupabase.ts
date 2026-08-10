@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 /**
  * Hermetic test harness: in-memory Supabase.
  *
@@ -24,6 +26,7 @@ interface QueryFilters {
   in: Array<[string, unknown[]]>;
   is: Array<[string, unknown]>;
   ilike: Array<[string, string]>;
+  lt: Array<[string, unknown]>;
   or: Array<OrCondition[]>;
   not: Array<[string, string, unknown]>;
   limit: number | null;
@@ -57,14 +60,19 @@ class FakeSupabaseQuery {
   private readonly filters: QueryFilters;
   private readonly pendingUpdate: Record<string, any> | null;
   private readonly pendingDelete: boolean;
+  // Mirrors real Postgres UPDATE ... RETURNING: set when .select() is called
+  // after .update(), so maybeSingle()/single()/then() apply the update and
+  // return the updated row(s) instead of only mutating in place.
+  private readonly withReturning: boolean;
 
   constructor(
     table: string,
     store: FakeSupabaseStore,
     selectCols: string[] = ['*'],
-    filters: QueryFilters = { eq: [], in: [], is: [], ilike: [], or: [], not: [], limit: null, order: [] },
+    filters: QueryFilters = { eq: [], in: [], is: [], ilike: [], lt: [], or: [], not: [], limit: null, order: [] },
     pendingUpdate: Record<string, any> | null = null,
-    pendingDelete = false
+    pendingDelete = false,
+    withReturning = false
   ) {
     this.table = table;
     this.store = store;
@@ -72,6 +80,7 @@ class FakeSupabaseQuery {
     this.filters = filters;
     this.pendingUpdate = pendingUpdate;
     this.pendingDelete = pendingDelete;
+    this.withReturning = withReturning;
   }
 
   private cloneFilters(): QueryFilters {
@@ -80,6 +89,7 @@ class FakeSupabaseQuery {
       in: [...this.filters.in],
       is: [...this.filters.is],
       ilike: [...this.filters.ilike],
+      lt: [...this.filters.lt],
       or: [...this.filters.or],
       not: [...this.filters.not],
       limit: this.filters.limit,
@@ -88,47 +98,52 @@ class FakeSupabaseQuery {
   }
 
   select(cols: string) {
-    return new FakeSupabaseQuery(this.table, this.store, cols.split(',').map((c) => c.trim()), this.cloneFilters(), this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, cols.split(',').map((c) => c.trim()), this.cloneFilters(), this.pendingUpdate, this.pendingDelete, this.pendingUpdate !== null);
   }
   eq(col: string, val: unknown) {
     const f = this.cloneFilters();
     f.eq.push([col, val]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   in(col: string, vals: unknown[]) {
     const f = this.cloneFilters();
     f.in.push([col, vals]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   is(col: string, val: unknown) {
     const f = this.cloneFilters();
     f.is.push([col, val]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   ilike(col: string, pattern: string) {
     const f = this.cloneFilters();
     f.ilike.push([col, pattern]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+  }
+  lt(col: string, val: unknown) {
+    const f = this.cloneFilters();
+    f.lt.push([col, val]);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   or(filterStr: string) {
     const f = this.cloneFilters();
     f.or.push(parseOrFilter(filterStr));
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   not(col: string, op: string, val: unknown) {
     const f = this.cloneFilters();
     f.not.push([col, op, val]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   order(col: string, opts: { ascending?: boolean } = {}) {
     const f = this.cloneFilters();
     f.order.push([col, opts.ascending === false ? 'desc' : 'asc']);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   limit(n: number) {
     const f = this.cloneFilters();
     f.limit = n;
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
   }
   upsert(rows: unknown) {
     this.store.upsert(this.table, rows);
@@ -139,15 +154,23 @@ class FakeSupabaseQuery {
     return this;
   }
   update(patch: unknown) {
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, this.cloneFilters(), patch as Record<string, any>, false);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, this.cloneFilters(), patch as Record<string, any>, false, false);
   }
   delete() {
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, this.cloneFilters(), null, true);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, this.cloneFilters(), null, true, false);
   }
   maybeSingle() {
+    if (this.pendingUpdate && this.withReturning) {
+      const rows = this.store.updateMatchingReturning(this.table, this.pendingUpdate, this.filters);
+      return Promise.resolve({ data: rows[0] ?? null, error: null });
+    }
     return this.store.resolve(this.table, this.selectCols, this.filters, true);
   }
   single() {
+    if (this.pendingUpdate && this.withReturning) {
+      const rows = this.store.updateMatchingReturning(this.table, this.pendingUpdate, this.filters);
+      return Promise.resolve({ data: rows.length >= 1 ? rows[0] : null, error: null });
+    }
     return this.store.resolve(this.table, this.selectCols, this.filters, false, true);
   }
   then(resolve: (value: any) => any, reject?: (reason?: any) => any) {
@@ -156,6 +179,10 @@ class FakeSupabaseQuery {
       return Promise.resolve({ data: null, error: null }).then(resolve, reject);
     }
     if (this.pendingUpdate) {
+      if (this.withReturning) {
+        const rows = this.store.updateMatchingReturning(this.table, this.pendingUpdate, this.filters);
+        return Promise.resolve({ data: rows.map((r) => this.store.project(r, this.selectCols)), error: null }).then(resolve, reject);
+      }
       this.store.updateMatching(this.table, this.pendingUpdate, this.filters);
       return Promise.resolve({ data: null, error: null }).then(resolve, reject);
     }
@@ -182,6 +209,8 @@ class FakeSupabaseStore {
   insert(table: string, payload: unknown): void {
     const rows = Array.isArray(payload) ? payload : [payload];
     for (const row of rows) {
+      // Mirrors real Postgres `id uuid primary key default gen_random_uuid()`.
+      if (row.id == null) row.id = crypto.randomUUID();
       this.tableRows(table).push({ ...row });
     }
   }
@@ -189,7 +218,8 @@ class FakeSupabaseStore {
   upsert(table: string, payload: unknown): void {
     const rows = Array.isArray(payload) ? payload : [payload];
     for (const row of rows) {
-      const existing = (row as Row).id != null ? this.tableRows(table).find((r) => r.id === (row as Row).id) : undefined;
+      if (row.id == null) row.id = crypto.randomUUID();
+      const existing = this.tableRows(table).find((r) => r.id === (row as Row).id);
       if (existing) {
         Object.assign(existing, row);
       } else {
@@ -210,6 +240,21 @@ class FakeSupabaseStore {
         Object.assign(row, patch);
       }
     }
+  }
+
+  /**
+   * Mirrors UPDATE ... WHERE ... RETURNING: applies `patch` to every row
+   * matching `filters` and returns the updated rows (in store order).
+   */
+  updateMatchingReturning(table: string, patch: Record<string, any>, filters: QueryFilters): Row[] {
+    const updated: Row[] = [];
+    for (const row of this.tableRows(table)) {
+      if (this.matches(row, filters)) {
+        Object.assign(row, patch);
+        updated.push(row);
+      }
+    }
+    return updated;
   }
 
   deleteRows(table: string, filters: QueryFilters): void {
@@ -236,6 +281,10 @@ class FakeSupabaseStore {
       const hay = String(row[col] ?? '');
       const needle = pattern.replace(/^%/, '').replace(/%$/, '');
       if (!hay.toLowerCase().includes(needle.toLowerCase())) return false;
+    }
+    for (const [col, val] of filters.lt) {
+      const actual = row[col];
+      if (actual == null || !(actual < val)) return false;
     }
     for (const [col, op, val] of filters.not) {
       if (op === 'is') {
@@ -283,7 +332,7 @@ class FakeSupabaseStore {
     return true;
   }
 
-  private project(row: Row, cols: string[]): Row {
+  project(row: Row, cols: string[]): Row {
     if (cols.length === 0 || (cols.length === 1 && cols[0] === '*')) return row;
     const out: Row = {};
     for (const col of cols) out[col] = row[col];
