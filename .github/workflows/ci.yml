@@ -138,7 +138,7 @@ jobs:
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci --prefix server
-      - name: Run hermetic test runner (50 suites, no live infra)
+      - name: Run hermetic test runner (55 suites, no live infra)
         run: npm test --prefix server
 
   migrations:

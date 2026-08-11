@@ -7,9 +7,18 @@ import { readFileSync } from 'node:fs';
 import { logger } from '../../logger.js';
 
 export class GitHubAuthError extends Error {
-  constructor(message: string) {
+  /**
+   * HTTP status when the error came from a rejected GitHub response (e.g.
+   * the installation token exchange). Undefined for local configuration
+   * failures (missing/undecodable credentials). The connector adapter uses
+   * this to distinguish auth_revoked (401/403) from not_configured.
+   */
+  readonly status?: number;
+
+  constructor(message: string, options: { status?: number } = {}) {
     super(message);
     this.name = 'GitHubAuthError';
+    this.status = options.status;
   }
 }
 
@@ -123,7 +132,8 @@ export class GitHubAppAuth {
 
       if (!res.ok) {
         throw new GitHubAuthError(
-          `GitHub installation token request failed with HTTP ${res.status}: ${res.statusText}`
+          `GitHub installation token request failed with HTTP ${res.status}: ${res.statusText}`,
+          { status: res.status }
         );
       }
 

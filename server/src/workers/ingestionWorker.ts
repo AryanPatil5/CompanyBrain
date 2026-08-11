@@ -20,13 +20,17 @@ import {
 import { ingestionQueue } from '../queue/ingestionQueue.js';
 import { processWebhookEventJob, recoverStaleWebhookEvents, DEFAULT_STALE_EVENT_TIMEOUT_MS } from '../ingestion/webhookPipeline.js';
 import { updateEventStatus } from '../services/ingestion/webhookService.js';
+import { dispatchConnectorSync, isCrawlerV2Enabled } from '../connectors/registry.js';
+import { registerBuiltinConnectors } from '../connectors/register.js';
 
 export interface IngestionJobData {
-  job_name: 'crawl_slack' | 'crawl_github' | 'crawl_linear' | 'crawl_zendesk' | 'crawl_email' | 'crawl_db' | 'all';
+  job_name: 'crawl_slack' | 'crawl_github' | 'crawl_linear' | 'crawl_zendesk' | 'crawl_email' | 'crawl_db' | 'crawl_provider' | 'all';
   workspace_id: string;
   requested_by?: string;
   inbox?: string;
   target_system?: string;
+  provider?: string;
+  incremental?: boolean;
 }
 
 export interface WebhookEventJobData {
@@ -78,87 +82,121 @@ async function logJobLifecycle(params: {
   }
 }
 
+/**
+ * The production ingestion job processor — the exact handler BullMQ invokes
+ * inside createIngestionWorker().
+ *
+ * Exported as a seam for the hermetic suites: the test harness stubs
+ * `Worker.prototype.run` (no polling, no job delivery), so the production
+ * processor would otherwise never execute in CI. Suites invoke this function
+ * directly with a controlled fake job to exercise the REAL logic — including
+ * the CRAWLER_V2 `crawl_provider` dispatch path and its flag gate — without
+ * live Redis.
+ */
+export async function processIngestionJob(job: Job<IngestionJobData>): Promise<unknown> {
+  const { job_name, workspace_id, inbox } = job.data;
+  const span = startTraceSpan(`BullMQ Job ${job_name}`, { jobId: job.id, workspaceId: workspace_id });
+  const startTime = Date.now();
+
+  logger.info(`[IngestionWorker] Processing job ${job.id} (${job_name}) for workspace ${workspace_id}... (Attempt #${job.attemptsMade + 1})`);
+
+  await job.updateProgress(10);
+  await logJobLifecycle({ jobId: job.id!, jobName: job_name, workspaceId: workspace_id, status: 'started' });
+
+  let result: any = null;
+
+  switch (job_name) {
+    case 'crawl_slack': {
+      result = await crawlSlackHistory(process.env.SLACK_INCIDENT_CHANNEL_ID || 'C0123456789', workspace_id);
+      await job.updateProgress(100);
+      break;
+    }
+    case 'crawl_github': {
+      result = await crawlGithubPostMortems(process.env.GITHUB_REPO || 'owner/repo', workspace_id);
+      await job.updateProgress(100);
+      break;
+    }
+    case 'crawl_linear': {
+      result = await crawlLinearIncidents(workspace_id);
+      await job.updateProgress(100);
+      break;
+    }
+    case 'crawl_zendesk': {
+      result = await crawlZendeskTickets(workspace_id);
+      await job.updateProgress(100);
+      break;
+    }
+    case 'crawl_email': {
+      const targetInbox = inbox || process.env.OPS_INBOX_EMAIL || 'ops-support@company.com';
+      result = await crawlEmailInbox(targetInbox, workspace_id);
+      await job.updateProgress(100);
+      break;
+    }
+    case 'crawl_db': {
+      result = await crawlDatabaseLogs(workspace_id);
+      await job.updateProgress(100);
+      break;
+    }
+    case 'crawl_provider': {
+      // CRAWLER_V2 (Phase 2 Task 2): generic registry-dispatched crawl.
+      // Strictly flag-gated: with the flag off the route rejects this job
+      // name, and even if a job somehow landed here we fail loudly rather
+      // than falling back to legacy behavior.
+      if (!isCrawlerV2Enabled()) {
+        throw new Error('crawl_provider dispatch is disabled: CRAWLER_V2 is not enabled.');
+      }
+      // Defensively validate the type as well as emptiness: job payloads
+      // arrive via JSON deserialization, so a non-string provider must hit
+      // this controlled contract error — not a raw `provider.trim()` TypeError.
+      const provider = job.data.provider;
+      if (typeof provider !== 'string' || !provider.trim()) {
+        throw new Error('crawl_provider job requires a non-empty provider field.');
+      }
+      result = await dispatchConnectorSync(provider.trim(), workspace_id, {
+        incremental: job.data.incremental,
+      });
+      await job.updateProgress(100);
+      break;
+    }
+    case 'all': {
+      await job.updateProgress(20);
+      const slack = await crawlSlackHistory(process.env.SLACK_INCIDENT_CHANNEL_ID || 'C0123456789', workspace_id);
+      await job.updateProgress(40);
+      const github = await crawlGithubPostMortems(process.env.GITHUB_REPO || 'owner/repo', workspace_id);
+      await job.updateProgress(60);
+      const linear = await crawlLinearIncidents(workspace_id);
+      await job.updateProgress(80);
+      const zendesk = await crawlZendeskTickets(workspace_id);
+      const email = await crawlEmailInbox(inbox || 'ops-support@company.com', workspace_id);
+      const db = await crawlDatabaseLogs(workspace_id);
+      await job.updateProgress(100);
+      result = { slack, github, linear, zendesk, email, db };
+      break;
+    }
+    default: {
+      throw new Error(`Unsupported job_name: ${job_name}`);
+    }
+  }
+
+  await logJobLifecycle({
+    jobId: job.id!,
+    jobName: job_name,
+    workspaceId: workspace_id,
+    status: 'completed',
+    result,
+  });
+
+  const durationMs = Date.now() - startTime;
+  span.end('ok');
+  recordMetric('ingestion_queue_latency_ms', durationMs, { job_name, workspace_id });
+
+  return result;
+}
+
 export function createIngestionWorker(): Worker<IngestionJobData> {
   const worker = new Worker<IngestionJobData>(
     'IngestionQueue',
-    async (job: Job<IngestionJobData>) => {
-      const { job_name, workspace_id, inbox } = job.data;
-      const span = startTraceSpan(`BullMQ Job ${job_name}`, { jobId: job.id, workspaceId: workspace_id });
-      const startTime = Date.now();
-
-      logger.info(`[IngestionWorker] Processing job ${job.id} (${job_name}) for workspace ${workspace_id}... (Attempt #${job.attemptsMade + 1})`);
-
-      await job.updateProgress(10);
-      await logJobLifecycle({ jobId: job.id!, jobName: job_name, workspaceId: workspace_id, status: 'started' });
-
-      let result: any = null;
-
-      switch (job_name) {
-        case 'crawl_slack': {
-          result = await crawlSlackHistory(process.env.SLACK_INCIDENT_CHANNEL_ID || 'C0123456789', workspace_id);
-          await job.updateProgress(100);
-          break;
-        }
-        case 'crawl_github': {
-          result = await crawlGithubPostMortems(process.env.GITHUB_REPO || 'owner/repo', workspace_id);
-          await job.updateProgress(100);
-          break;
-        }
-        case 'crawl_linear': {
-          result = await crawlLinearIncidents(workspace_id);
-          await job.updateProgress(100);
-          break;
-        }
-        case 'crawl_zendesk': {
-          result = await crawlZendeskTickets(workspace_id);
-          await job.updateProgress(100);
-          break;
-        }
-        case 'crawl_email': {
-          const targetInbox = inbox || process.env.OPS_INBOX_EMAIL || 'ops-support@company.com';
-          result = await crawlEmailInbox(targetInbox, workspace_id);
-          await job.updateProgress(100);
-          break;
-        }
-        case 'crawl_db': {
-          result = await crawlDatabaseLogs(workspace_id);
-          await job.updateProgress(100);
-          break;
-        }
-        case 'all': {
-          await job.updateProgress(20);
-          const slack = await crawlSlackHistory(process.env.SLACK_INCIDENT_CHANNEL_ID || 'C0123456789', workspace_id);
-          await job.updateProgress(40);
-          const github = await crawlGithubPostMortems(process.env.GITHUB_REPO || 'owner/repo', workspace_id);
-          await job.updateProgress(60);
-          const linear = await crawlLinearIncidents(workspace_id);
-          await job.updateProgress(80);
-          const zendesk = await crawlZendeskTickets(workspace_id);
-          const email = await crawlEmailInbox(inbox || 'ops-support@company.com', workspace_id);
-          const db = await crawlDatabaseLogs(workspace_id);
-          await job.updateProgress(100);
-          result = { slack, github, linear, zendesk, email, db };
-          break;
-        }
-        default: {
-          throw new Error(`Unsupported job_name: ${job_name}`);
-        }
-      }
-
-      await logJobLifecycle({
-        jobId: job.id!,
-        jobName: job_name,
-        workspaceId: workspace_id,
-        status: 'completed',
-        result,
-      });
-
-      const durationMs = Date.now() - startTime;
-      span.end('ok');
-      recordMetric('ingestion_queue_latency_ms', durationMs, { job_name, workspace_id });
-
-      return result;
-    },
+    processIngestionJob,
     {
       connection: redisConnection,
       concurrency: 5, // Concurrency: 5 parallel workers
@@ -388,6 +426,10 @@ export async function stopWebhookEventWorker(): Promise<void> {
 }
 
 export function startIngestionWorker(): Worker<IngestionJobData> {
+  // The connector registry is process-local: register builtins so
+  // CRAWLER_V2=true crawl_provider jobs can resolve their connector. Idempotent.
+  registerBuiltinConnectors();
+
   if (!workerInstance) {
     logger.info('[IngestionWorker] Starting BullMQ Ingestion Worker (Concurrency: 5, Rate Limiter: 100/min)...');
     workerInstance = createIngestionWorker();

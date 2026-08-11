@@ -372,6 +372,28 @@ flowchart LR
 - Rate limits: 429/403 handling via `Retry-After` / `x-ratelimit-reset`, cursor pagination on all list calls, jittered exponential retries.
 - Document metadata: `workspaceId`, `repositoryId`, `repositoryName`, `branch`, `commit`, `author`, `url`, `createdAt`, `updatedAt`, `permissions`, `source`.
 
+### 5.4 Connector Contract & Registry (Phase 2 Task 2)
+
+A provider-agnostic connector contract lives in `server/src/connectors/` — the contract all future sources (Notion, Confluence, Linear, ...) implement, and the same surface the Phase 12 SDK exposes to external authors:
+
+- **`types.ts`** — the `Connector` interface (capability-based, not a rigid 5-method surface): `isConfigured`, `listObjects` (async-generator of pages), `fetchObject`, `fetchAcl`, `getDeltaCursor`, `ack`, optional `sync()`/`close()`. Every method takes an explicit `workspaceId` — there is no zero-workspace fallback. Shared types: `ConnectorCapabilities`, `SourceObject`, `SourceAcl` (provisional until ADR-T3), `SyncCursor`, `ConnectorSyncOptions/Result/Checkpoint` (`acknowledged` reports ack-based bookkeeping; `indexed` is only ever set from real persistence), and the typed `ConnectorError` taxonomy (`not_configured`, `auth_revoked`, `rate_limited`, `not_found`, `network`, `timeout`, `malformed_response`, `unsupported`, `internal`).
+- **`registry.ts`** — `registerConnector` (duplicate provider rejected), `getConnector`, `listConnectors`, and `dispatchConnectorSync(provider, workspaceId, opts)` — the flag-independent core the worker calls. Phased connectors run their `sync()`; list-based connectors run a generic list → ack loop that reports discovered/acknowledged counts (`acknowledged`, never `indexed` — nothing is persisted on that path). `isCrawlerV2Enabled()` gates the new dispatch path behind `CRAWLER_V2` (off by default — the legacy `crawl_*` path stays byte-identical).
+- **`register.ts`** — `registerBuiltinConnectors()` (idempotent) wires the builtin GitHub connector into every production process that needs it: the `api` process (so `GET /api/ingestion/connectors` works) and the `ingestion-worker` process (so `CRAWLER_V2=true` `crawl_provider` jobs resolve).
+- **`githubConnector.ts`** — the production GitHub adapter: wraps `GitHubAppAuth` + `GithubSyncService` without modifying their internals. Capabilities: incremental + phased sync, webhookMode `provider_queue` (the PROVIDER owns delivery: GitHub App webhooks are verified and enqueue `github-sync` jobs; durable_ledger is a different topology used by other providers — not a GitHub upgrade path), cursorStore `github_sync_state`, `supportsAcl=false` until ADR-T3. Native GitHub errors map onto the `ConnectorError` taxonomy (401/403 → `auth_revoked`, 404 → `not_found`, 429 → `rate_limited`, ≥500/status-less → `network`, timeouts → `timeout`). `isConfigured(workspaceId)` is per-workspace truthful: app credentials AND at least one registered installation for the workspace.
+
+```mermaid
+flowchart LR
+    A[POST /api/ingestion/run<br/>job_name=crawl_provider<br/>CRAWLER_V2=true] --> B[ingestionWorker]
+    B --> C[dispatchConnectorSync]
+    C -->|phased| D[sync: per-repo syncRepository]
+    C -->|list-based| E[listObjects → ack<br/>reports discovered/acknowledged, never indexed]
+    D --> F[persistSourceDocumentWithChunks<br/>+ github_sync_state]
+```
+
+- The `CRAWLER_V2` feature flag lives in `server/.env.example` under the feature-flag inventory; when off, `crawl_provider` jobs are rejected with the legacy 400 message and everything else is untouched.
+- **Conformance suite** (`server/test/connectors/conformance.test.ts`): `runConformance(connector, ctx)` asserts the contract invariants (workspace scoping, no credential-shaped metadata, ack idempotence, cross-workspace isolation) — the same suite gates Phase 12 SDK authors.
+
+
 ### 5.2 BullMQ Ingestion Job Flow
 
 ```mermaid

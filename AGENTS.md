@@ -38,7 +38,7 @@ npm run build --prefix client
 
 # Tests: custom console runners via tsx, NO test framework. Self-execute when
 # run directly (pattern: `if (import.meta.url === file://${process.argv[1]})`).
-npm test --prefix server             # hermetic CI run: tsx test/run-all.ts (50 suites, see test/HERMETIC_TESTING_REPORT.md)
+npm test --prefix server             # hermetic CI run: tsx test/run-all.ts (55 suites, see test/HERMETIC_TESTING_REPORT.md)
 npm run test:e2e --prefix server     # end-to-end suite
 npx tsx server/test/<path>.test.ts   # any single suite (all under server/test/**)
 ```

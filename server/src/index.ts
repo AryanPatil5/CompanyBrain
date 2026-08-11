@@ -12,6 +12,7 @@ import githubRouter from './routes/github.js';
 import { observabilityMiddleware, getMetricsSnapshot } from './middleware/observability.js';
 import { telemetryMiddleware, getPrometheusMetricsString } from './middleware/telemetry.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
+import { registerBuiltinConnectors } from './connectors/register.js';
 import {
   buildHealthPayload,
   checkAIProviderConfigured,
@@ -112,6 +113,10 @@ app.get('/metrics', (_req, res) => {
  * per-process boot topology.
  */
 export function startApiServer(): Server {
+  // The connector registry is process-local: register builtins before serving
+  // so GET /api/ingestion/connectors can actually report them. Idempotent.
+  registerBuiltinConnectors();
+
   const server = app.listen(PORT, () => {
     logger.info(`[INFO] Company Brain REST API running at http://localhost:${PORT}`);
   });

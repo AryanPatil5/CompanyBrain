@@ -171,6 +171,8 @@ Production-grade GitHub App connector (`server/src/connectors/github/`) that ing
 
 **Migrations:** `server/supabase/030_github_connector.sql` (`github_repositories`, `github_sync_state`, `github_indexed_documents`, all with tenant-isolation RLS).
 
+**Connector contract (Phase 2 Task 2):** the GitHub connector is also exposed through the provider-agnostic connector contract in `server/src/connectors/` — `types.ts` (capability-based `Connector` interface), `registry.ts` (registration + `dispatchConnectorSync`, gated behind the `CRAWLER_V2` flag), and `githubConnector.ts` (the adapter wrapping the internals above without modifying them). New sources implement the same contract; the conformance suite (`server/test/connectors/conformance.test.ts`) asserts the invariants and doubles as the Phase 12 SDK-authoring gate. `GET /api/ingestion/connectors` reports configured providers per workspace.
+
 **Manual test (local):**
 ```bash
 # 1. Apply migration 030 in Supabase SQL Editor.

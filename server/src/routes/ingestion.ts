@@ -24,6 +24,7 @@ import { ingestionQueue } from '../queue/ingestionQueue.js';
 import { type IngestionJobData } from '../workers/ingestionWorker.js';
 import { ingestWebhookEvent } from '../ingestion/webhookPipeline.js';
 import { extractWebhookEventTimestamp } from '../services/ingestion/webhookService.js';
+import { listConnectors, getConnector, hasConnector, isCrawlerV2Enabled } from '../connectors/registry.js';
 
 const router = Router();
 
@@ -196,6 +197,39 @@ router.get('/events/:eventId', authenticate, async (req: Request, res: Response)
   }
 });
 
+// ─── Connector registry (Phase 2 Task 2) ────────────────────────
+// Capability discovery for the authenticated workspace. Never exposes
+// credentials, access tokens, secrets, OAuth state, or raw connector
+// configuration — only the provider, display name, capability flags, and
+// whether the connector is configured for this workspace.
+
+router.get('/connectors', authenticate, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const connectors = listConnectors();
+    const result = [];
+    for (const entry of connectors) {
+      const connector = getConnector(entry.provider);
+      let configured = false;
+      try {
+        configured = await connector.isConfigured(user.workspace_id);
+      } catch {
+        configured = false;
+      }
+      result.push({
+        provider: entry.provider,
+        display_name: entry.displayName,
+        capabilities: entry.capabilities,
+        configured,
+      });
+    }
+    res.json({ workspace_id: user.workspace_id, connectors: result });
+  } catch (error) {
+    logger.error('[Ingestion Error] Connector registry listing failed:', error);
+    res.status(500).json({ error: 'Internal server error listing connectors.' });
+  }
+});
+
 // ─── Asynchronous Crawler Worker Queue Endpoints ─────────────
 
 const VALID_JOB_NAMES = new Set(['crawl_slack', 'crawl_github', 'crawl_linear', 'crawl_zendesk', 'crawl_email', 'crawl_db', 'all']);
@@ -204,6 +238,61 @@ router.post('/run', authenticate, ingestionLimiter, async (req: Request, res: Re
   try {
     const user = (req as AuthenticatedRequest).user!;
     const requestedJob = req.body?.job_name || req.body?.source || 'all';
+
+    // CRAWLER_V2 (Phase 2 Task 2): generic registry-dispatched crawl.
+    // Strictly flag-gated — with the flag off this branch is unreachable and
+    // the legacy VALID_JOB_NAMES behavior below is byte-for-byte unchanged.
+    if (requestedJob === 'crawl_provider') {
+      if (!isCrawlerV2Enabled()) {
+        res.status(400).json({
+          error: `Invalid job_name. Must be one of: ${Array.from(VALID_JOB_NAMES).join(', ')}`,
+        });
+        return;
+      }
+      const provider = req.body?.provider;
+      if (!provider || typeof provider !== 'string' || !provider.trim()) {
+        res.status(400).json({ error: "crawl_provider requires a 'provider' field (e.g. provider: 'github')." });
+        return;
+      }
+      // Reject unknown providers BEFORE enqueue: a job that can never resolve
+      // its connector must not be queued (it would only fail in the worker).
+      const normalizedProvider = provider.trim();
+      if (!hasConnector(normalizedProvider)) {
+        const known = listConnectors()
+          .map((c) => c.provider)
+          .join(', ');
+        res.status(400).json({
+          error: `Unknown connector provider '${normalizedProvider}'. Registered providers: ${known || 'none'}.`,
+        });
+        return;
+      }
+
+      const jobData: IngestionJobData = {
+        job_name: 'crawl_provider',
+        workspace_id: user.workspace_id,
+        requested_by: user.user_id,
+        provider: normalizedProvider,
+        incremental: req.body?.incremental,
+      };
+
+      let jobId = `job_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      try {
+        const job = await ingestionQueue.add('crawl_provider', jobData);
+        if (job?.id) {
+          jobId = String(job.id);
+        }
+      } catch (queueErr) {
+        logger.warn('[Ingestion Queue Warning] Failed to enqueue to Redis BullMQ, returning fallback jobId:', queueErr);
+      }
+
+      res.status(202).json({
+        success: true,
+        jobId,
+        status: 'queued',
+        message: `Crawl job for provider '${normalizedProvider}' enqueued via the connector registry.`,
+      });
+      return;
+    }
 
     if (!VALID_JOB_NAMES.has(requestedJob)) {
       res.status(400).json({

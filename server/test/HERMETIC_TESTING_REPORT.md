@@ -4,7 +4,7 @@ Status: **DONE** — `npm test` is hermetic, deterministic, and CI-ready.
 
 ## Summary
 
-`npm test` (i.e. `tsx test/run-all.ts` inside `server/`) now runs **50 suites / 62 monolith
+`npm test` (i.e. `tsx test/run-all.ts` inside `server/`) now runs **55 suites / 62 monolith
 checks** with **no live network, no Redis, no Postgres/Supabase, no Docker, no paid LLM
 calls**, each suite bounded by a hard per-suite timeout, and the process exits `0` only when
 everything passes. Verified with three consecutive full green runs (all `50 passed, 0 failed`,
@@ -32,7 +32,7 @@ made paid OpenRouter calls when run standalone.
 ## Coverage
 
 - `test/mcp-guardrails.test.ts` monolith (tests 1–58) — all green.
-- 49 standalone suites under `agents/`, `connectors/github/`, `eval/`, `graph/`, `infra/`,
+- 54 standalone suites under `agents/`, `connectors/github/`, `eval/`, `graph/`, `infra/`,
   `middleware/`, `parsers/`, `retrieval/`, `routes/`, `security/`, `services/`, `skills/`,
   `workers/`, `workflows/` — all green.
 

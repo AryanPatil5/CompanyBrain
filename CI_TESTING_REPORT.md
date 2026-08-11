@@ -33,7 +33,7 @@ runtimes on 2026-09-16.
 | `lint-server` / `lint-client` | Style/smell hygiene | `eslint` (`npm run lint`), one job per package (per-package cache). Client warnings pass (0 errors required); server must be error-free. |
 | `typecheck-server` / `typecheck-client` | Type safety | `tsc --noEmit` / `tsc`. |
 | `build-server` / `build-client` | Build + artifact reproducibility | `npm run build`, then rebuild from a clean `dist` and `diff` sorted `sha256sum` snapshots of all emitted files — byte-identical outputs required. |
-| `test` | Full regression gate | `npm test` = the **hermetic runner from Task 3** (`tsx test/run-all.ts`, 50 suites, no live Redis/Postgres/Supabase/LLM/network, per-suite hard timeouts, `EXIT=0` only when everything passes). |
+| `test` | Full regression gate | `npm test` = the **hermetic runner from Task 3** (`tsx test/run-all.ts`, 55 suites, no live Redis/Postgres/Supabase/LLM/network, per-suite hard timeouts, `EXIT=0` only when everything passes). |
 | `migrations` | Schema/applier integrity | Fresh `pgvector/pgvector:pg16` service container (5433 — Ubuntu runners already run Postgres on 5432), `npm run migrate` from scratch, asserts `0 pending`, asserts an idempotent re-run (`0 applied, N already applied`). Duplicate-version and checksum-mismatch guards are enforced inside the migrator itself (nonzero exit). |
 | `helm` | Kubernetes manifests | `helm lint` + `helm template` renders the chart and asserts non-empty output. |
 | `secrets` | Secret leakage | gitleaks on the full git history (fetch-depth 0). |

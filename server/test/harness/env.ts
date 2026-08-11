@@ -19,6 +19,11 @@ export function installHarnessEnv(): void {
   process.env.AI_TIMEOUT_MS = '2000';
   process.env.SANDBOX_FORCE_LOCAL = 'true';
   process.env.OTEL_ENABLED = 'false';
+  // A developer's real Slack credentials must never leak into hermetic tests:
+  // the legacy Slack crawler short-circuits to `skipped` only when
+  // unconfigured (src/services/crawlers/slack.ts reads these at module load).
+  delete process.env.SLACK_BOT_TOKEN;
+  delete process.env.SLACK_USER_TOKEN;
   if (process.env.LOG_LEVEL === undefined) {
     process.env.LOG_LEVEL = 'warn';
   }

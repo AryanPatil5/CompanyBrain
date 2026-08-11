@@ -34,6 +34,8 @@ const SUITES: SuiteEntry[] = [
   { name: 'connectors/github/mapper', file: './connectors/github/mapper.test.js', run: 'runMapperTest', timeoutMs: 120_000 },
   { name: 'connectors/github/webhook', file: './connectors/github/webhook.test.js', run: 'runWebhookTest', timeoutMs: 120_000 },
   { name: 'connectors/github/sync', file: './connectors/github/sync.test.js', run: 'runSyncTest', timeoutMs: 120_000 },
+  { name: 'connectors/registry', file: './connectors/registry.test.js', run: 'runRegistryTest', timeoutMs: 120_000 },
+  { name: 'connectors/conformance', file: './connectors/conformance.test.js', run: 'runConnectorConformanceTest', timeoutMs: 120_000 },
   { name: 'infra/costMeter', file: './infra/costMeter.test.js', run: 'runCostMeterTests', timeoutMs: 120_000 },
   { name: 'infra/health', file: './infra/health.test.js', run: 'runHealthTests', timeoutMs: 120_000 },
   { name: 'infra/logger', file: './infra/logger.test.js', run: 'runLoggerTests', timeoutMs: 120_000 },
