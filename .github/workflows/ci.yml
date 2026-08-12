@@ -145,6 +145,11 @@ jobs:
     name: Migration verification
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Postgres service is published on 5433 (5432 on the runner host is the
+      # preinstalled Postgres). migrator.ts falls back to localhost:5432 when
+      # DATABASE_URL is unset, so it must be set at job level for every step.
+      DATABASE_URL: postgresql://brain_user:brain_password@localhost:5433/company_brain
     services:
       postgres:
         # pgvector variant required: migrations 005+ create the `vector`
@@ -172,8 +177,6 @@ jobs:
       - run: npm ci --prefix server
       - name: Apply all migrations from scratch
         run: npm run migrate --prefix server
-        env:
-          DATABASE_URL: postgresql://brain_user:brain_password@localhost:5433/company_brain
       - name: Assert zero pending migrations
         run: |
           npm run migrate:status --prefix server > /tmp/mig-status.txt
@@ -183,8 +186,6 @@ jobs:
         run: |
           npm run migrate --prefix server > /tmp/mig-again.txt
           grep -E "Done: 0 applied, [1-9][0-9]* already applied" /tmp/mig-again.txt
-        env:
-          DATABASE_URL: postgresql://brain_user:brain_password@localhost:5433/company_brain
 
   helm:
     name: Helm chart validation
