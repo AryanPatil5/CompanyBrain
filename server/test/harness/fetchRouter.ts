@@ -76,6 +76,70 @@ export function judgeEntityMatch(prompt: string): string {
   return JSON.stringify({ match: identical || subsumed, canonicalName: match[2] });
 }
 
+/**
+ * Deterministic claim-extraction judge: serves the Phase 3 claim extractor a
+ * schema-valid JSON claim list grounded in the actual chunk content between
+ * the prompt's markers. Evidence offsets are computed from the real chunk
+ * string so grounding checks in the claim suites are meaningful.
+ */
+export function judgeClaims(prompt: string): string {
+  const marker = prompt.match(/"""\n([\s\S]*?)\n"""/);
+  const content = marker ? marker[1] : '';
+  const trimmed = content.trim();
+  if (!trimmed) return JSON.stringify({ claims: [] });
+
+  // First sentence-like span of the chunk (bounded to claim-length) becomes
+  // the atomic claim; offsets are computed against the real chunk content.
+  const end = Math.min(trimmed.length, 120);
+  const claimText = trimmed.slice(0, end).trim();
+  if (claimText.length < 10) return JSON.stringify({ claims: [] });
+  const start = content.indexOf(claimText);
+  return JSON.stringify({
+    claims: [
+      {
+        claim_text: claimText,
+        claim_type: 'operational',
+        confidence: 0.9,
+        char_start: start,
+        char_end: start + claimText.length,
+      },
+    ],
+  });
+}
+
+/**
+ * Deterministic SOP-extraction judge: serves the extractor a schema-valid
+ * ExtractedSOP so the full webhook -> source document/chunks -> claims ->
+ * SOP -> claim-linkage path can be exercised hermetically. Confidence 0.9
+ * clears the 0.4 acceptance gate; the entity mention lets the canonical
+ * entity resolver run too.
+ */
+export function judgeSopExtraction(prompt: string): string {
+  void prompt;
+  return JSON.stringify({
+    is_valid_sop: true,
+    confidence_score: 0.9,
+    title: 'Incident Postmortem Procedure',
+    category: 'Engineering',
+    trigger_condition: 'When a production incident occurs',
+    preconditions: [],
+    execution_steps: [
+      {
+        step_number: 1,
+        action: 'Document the incident timeline',
+        target_system: 'Linear',
+        parameters: null,
+        condition: null,
+        on_failure: null,
+      },
+    ],
+    entities: [{ id: 'sys_postgres', name: 'PostgreSQL', type: 'System' }],
+    relationships: [],
+    risk_level: 'Low',
+    requires_human_gate: false,
+  });
+}
+
 export function installFetchRouter(): void {
   globalThis.fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
@@ -95,7 +159,11 @@ export function installFetchRouter(): void {
       const prompt = String(body.prompt ?? '');
       const system = String(body.system ?? '');
       let responseText = DEFAULT_COMPLETION;
-      if (prompt.includes('identical business entities')) {
+      if (prompt.includes('Extract atomic operational claims')) {
+        responseText = judgeClaims(prompt);
+      } else if (prompt.includes('extract an SOP object if a clear procedure exists')) {
+        responseText = judgeSopExtraction(prompt);
+      } else if (prompt.includes('identical business entities')) {
         responseText = judgeEntityMatch(prompt);
       } else if (prompt.includes('AGENT RESPONSE:') || system.includes('unsupportedClaims') || system.includes('grounding safety judge')) {
         const verdict = judgeGrounding(prompt);

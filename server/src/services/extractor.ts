@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 import { z } from 'zod';
 import { supabase } from '../config/supabase.js';
 import { generateText } from './aiProvider.js';
-import { addEntityNode, createRelationship } from './graph/graphService.js';
 
 dotenv.config();
 
@@ -174,26 +173,12 @@ Return JSON output matching this schema:
       return null;
     }
 
-    // Persist extracted graph entities and relationships into relational graph tables
-    try {
-      if (Array.isArray(validated.entities)) {
-        for (const ent of validated.entities) {
-          await addEntityNode(ent.type, {
-            id: ent.id,
-            name: ent.name,
-            workspace_id: workspaceId,
-          });
-        }
-      }
-
-      if (Array.isArray(validated.relationships)) {
-        for (const rel of validated.relationships) {
-          await createRelationship(rel.source, rel.target, rel.relationship_type);
-        }
-      }
-    } catch (graphErr) {
-      logger.warn('[Extractor Warning] Graph persistence failed:', graphErr);
-    }
+    // NOTE (Phase 3): graph persistence moved OUT of the extractor. Entity and
+    // relationship mentions travel with the ExtractedSOP; the ingestion
+    // pipeline resolves them into the canonical `entities` /
+    // `entity_relationships` corpus tables and projects enum-compatible
+    // relationships into graph_nodes/graph_edges via
+    // knowledge/entityResolver.resolveEntitiesForDocument (ADR-T15).
 
     return validated;
   } catch (error) {

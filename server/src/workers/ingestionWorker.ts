@@ -22,6 +22,11 @@ import { processWebhookEventJob, recoverStaleWebhookEvents, DEFAULT_STALE_EVENT_
 import { updateEventStatus } from '../services/ingestion/webhookService.js';
 import { dispatchConnectorSync, isCrawlerV2Enabled } from '../connectors/registry.js';
 import { registerBuiltinConnectors } from '../connectors/register.js';
+import { chunkAndPersistDocument, extractAndPersistClaims } from '../ingestion/documentPipeline.js';
+import { parseDocument } from '../services/parsers/documentParser.js';
+import { parseDocx } from '../services/parsers/docxParser.js';
+import { parseSpreadsheet } from '../services/parsers/spreadsheetParser.js';
+import { getStorageProvider } from '../services/storage/storageProvider.js';
 
 export interface IngestionJobData {
   job_name: 'crawl_slack' | 'crawl_github' | 'crawl_linear' | 'crawl_zendesk' | 'crawl_email' | 'crawl_db' | 'crawl_provider' | 'all';
@@ -38,13 +43,24 @@ export interface WebhookEventJobData {
   workspaceId: string;
 }
 
+export interface DocumentIngestionJobData {
+  job_name: 'parse_document';
+  document_id: string;
+  workspace_id: string;
+  storage_key: string;
+  content_type: string;
+  content_hash?: string;
+}
+
 let workerInstance: Worker<IngestionJobData> | null = null;
 let webhookWorkerInstance: Worker<WebhookEventJobData> | null = null;
+let documentWorkerInstance: Worker<DocumentIngestionJobData> | null = null;
 let webhookSweepTimer: NodeJS.Timeout | null = null;
 
 // Dead-Letter Queue (DLQ) for failed ingestion tasks requiring manual inspection
 export const dlqQueue = new Queue<IngestionJobData>('ingestion-dlq', { connection: redisConnection });
 export const webhookDlqQueue = new Queue<WebhookEventJobData>('webhook-ingestion-dlq', { connection: redisConnection });
+export const documentDlqQueue = new Queue<DocumentIngestionJobData>('document-ingestion-dlq', { connection: redisConnection });
 
 async function logJobLifecycle(params: {
   jobId: string;
@@ -425,6 +441,237 @@ export async function stopWebhookEventWorker(): Promise<void> {
   }
 }
 
+// ─── Phase 3: document ingestion worker (parse_document) ─────
+
+export interface ParsedUploadContent {
+  text: string;
+  ocrRequired: boolean;
+}
+
+/**
+ * MIME-dispatched parse for uploads. PDFs route through the existing
+ * layout-aware parser (which carries the password-protected + scanned-OCR
+ * detection); .docx through mammoth; spreadsheets/CSV through the text
+ * projection; plain text/markdown pass through verbatim. Scanned PDFs
+ * return ocrRequired=true — the pipeline moves them to the explicit
+ * `ocr_required` stage instead of fabricating text.
+ */
+export async function parseUploadedContent(buffer: Buffer, contentType: string): Promise<ParsedUploadContent> {
+  const mime = (contentType || '').toLowerCase();
+
+  if (mime.includes('pdf')) {
+    const parsed = await parseDocument(buffer, mime, 'upload.pdf');
+    if (parsed.metadata?.layoutStructure === 'scanned_ocr_required' || !parsed.rawText.trim()) {
+      return { text: '', ocrRequired: true };
+    }
+    return { text: parsed.rawText, ocrRequired: false };
+  }
+
+  if (mime.includes('wordprocessingml')) {
+    const docx = await parseDocx(buffer);
+    return { text: docx.text, ocrRequired: false };
+  }
+
+  if (mime.includes('spreadsheetml') || mime.includes('ms-excel') || mime.includes('csv')) {
+    const ss = await parseSpreadsheet(buffer, mime);
+    return { text: ss.text, ocrRequired: false };
+  }
+
+  // text/plain, text/markdown
+  return { text: buffer.toString('utf-8'), ocrRequired: false };
+}
+
+async function markExtractionStage(documentId: string, workspaceId: string, stage: string): Promise<void> {
+  const { error } = await supabase
+    .from('source_documents')
+    .update({ extraction_stage: stage })
+    .eq('id', documentId)
+    .eq('workspace_id', workspaceId);
+  if (error) {
+    logger.warn(`[DocumentWorker Warning] Failed to mark extraction_stage=${stage}:`, error);
+  }
+}
+
+/**
+ * The production `parse_document` processor — exported as the hermetic-test
+ * seam (same pattern as processIngestionJob). Flow:
+ *
+ *   load row -> parsing -> get object from storage -> parse by MIME
+ *   -> (ocr_required terminal state, never fabricated text)
+ *   -> document pipeline (chunk + embed + claims) -> completed
+ *
+ * Stage checkpoints are resumable: the content-hash short-circuit in the
+ * pipeline makes a retry of an unchanged, completed document a no-op.
+ * Failures mark the row `failed` and rethrow (BullMQ retries, then DLQ).
+ */
+export async function processDocumentIngestionJob(job: Job<DocumentIngestionJobData>): Promise<unknown> {
+  const { document_id, workspace_id, storage_key, content_type, content_hash } = job.data;
+  const span = startTraceSpan('BullMQ Document Parse', { jobId: job.id, documentId: document_id, workspaceId: workspace_id });
+  const startTime = Date.now();
+
+  logger.info(`[DocumentWorker] Processing document ${document_id} for workspace ${workspace_id}... (Attempt #${job.attemptsMade + 1})`);
+
+  try {
+    await job.updateProgress(5);
+
+    // ── Load the document row (workspace-scoped; cross-workspace = error) ──
+    const { data: docRow, error: rowErr } = await supabase
+      .from('source_documents')
+      .select('id, title, storage_uri, extraction_stage, metadata')
+      .eq('id', document_id)
+      .eq('workspace_id', workspace_id)
+      .maybeSingle();
+
+    if (rowErr || !docRow) {
+      throw new Error(`Document ${document_id} not found in workspace ${workspace_id}: ${rowErr?.message ?? 'no row'}`);
+    }
+
+    await markExtractionStage(document_id, workspace_id, 'parsing');
+    await job.updateProgress(20);
+
+    // ── Fetch the raw object (storage is a hard dependency of this job) ──
+    const provider = getStorageProvider();
+    if (!provider) {
+      throw new Error('Object storage is not configured; cannot parse uploaded document.');
+    }
+    const object = await provider.getObject(storage_key);
+    if (!object) {
+      throw new Error(`Object ${storage_key} missing from storage; document cannot be parsed.`);
+    }
+
+    // ── Parse by validated MIME ───────────────────────────────────────────
+    const parsed = await parseUploadedContent(object.body, content_type);
+    if (parsed.ocrRequired) {
+      // Explicit terminal state — the corpus keeps the raw object; a future
+      // OCR phase can resume from here without re-uploading.
+      await markExtractionStage(document_id, workspace_id, 'ocr_required');
+      await job.updateProgress(100);
+      span.end('ok');
+      return { status: 'ocr_required', document_id };
+    }
+
+    await job.updateProgress(40);
+
+    // ── Chunk + persist (stage checkpoint) ───────────────────────────────
+    await markExtractionStage(document_id, workspace_id, 'chunking');
+    const chunkStage = await chunkAndPersistDocument({
+      workspaceId: workspace_id,
+      source: 'upload',
+      externalId: content_hash || `${storage_key}`,
+      title: docRow.title || 'upload',
+      text: parsed.text,
+      sourceObjectKey: storage_key,
+      storageUri: docRow.storage_uri ?? undefined,
+      metadata: {
+        ...(docRow.metadata ?? {}),
+        content_type,
+        storage_key,
+      },
+    });
+
+    await job.updateProgress(60);
+    await markExtractionStage(document_id, workspace_id, 'embedding');
+
+    // ── Claims + evidence (ADR-T15), stage checkpointed ──────────────────
+    await markExtractionStage(document_id, workspace_id, 'claims');
+    const claims = await extractAndPersistClaims(
+      {
+        workspaceId: workspace_id,
+        source: 'upload',
+        externalId: content_hash || `${storage_key}`,
+        title: docRow.title || 'upload',
+        text: parsed.text,
+        sourceObjectKey: storage_key,
+        storageUri: docRow.storage_uri ?? undefined,
+        metadata: {
+          ...(docRow.metadata ?? {}),
+          content_type,
+          storage_key,
+        },
+      },
+      chunkStage
+    );
+
+    const documentId = chunkStage.document?.id ?? document_id;
+    await markExtractionStage(documentId, workspace_id, 'completed');
+    await job.updateProgress(100);
+
+    const result = {
+      status: 'completed',
+      document_id: documentId,
+      chunks: chunkStage.document?.chunksPersisted ?? 0,
+      claims: claims.length,
+    };
+
+    span.end('ok');
+    recordMetric('document_parse_latency_ms', Date.now() - startTime, { workspace_id });
+    return result;
+  } catch (err) {
+    span.end('error');
+    // Terminal failure marker: retries will re-run the resumable pipeline
+    // (content-hash short-circuit) once the underlying cause clears.
+    await markExtractionStage(document_id, workspace_id, 'failed');
+    throw err;
+  }
+}
+
+export function createDocumentIngestionWorker(): Worker<DocumentIngestionJobData> {
+  const worker = new Worker<DocumentIngestionJobData>(
+    'document-ingestion',
+    processDocumentIngestionJob,
+    {
+      connection: redisConnection,
+      concurrency: 3,
+    }
+  );
+
+  worker.on('completed', (job) => {
+    logger.info(`[DocumentWorker] Document job ${job.id} (${job.data.document_id}) completed.`);
+  });
+
+  worker.on('failed', async (job, err) => {
+    logger.error(`[DocumentWorker] Document job ${job?.id} (${job?.data?.document_id}) failed:`, err.message);
+    if (job && job.attemptsMade >= (job.opts.attempts || 3)) {
+      logger.warn(`[DocumentWorker] Document job ${job.id} reached maximum retries. Routing to document-ingestion-dlq...`);
+      try {
+        await documentDlqQueue.add('dlq_failed_document', job.data, { jobId: `dlq_${job.id}` });
+      } catch (dlqErr: any) {
+        logger.error('[DocumentWorker Error] Failed to push to document DLQ:', dlqErr.message);
+      }
+    }
+  });
+
+  worker.on('error', (err) => {
+    if ((err as any).code === 'ECONNREFUSED') {
+      // Suppress offline Redis dev message
+    } else {
+      logger.error('[DocumentWorker Error]:', err);
+    }
+  });
+
+  return worker;
+}
+
+export function isDocumentIngestionWorkerRunning(): boolean {
+  return documentWorkerInstance !== null && documentWorkerInstance.isRunning();
+}
+
+export function startDocumentIngestionWorker(): Worker<DocumentIngestionJobData> {
+  if (!documentWorkerInstance) {
+    logger.info('[DocumentWorker] Starting BullMQ document ingestion worker (Concurrency: 3)...');
+    documentWorkerInstance = createDocumentIngestionWorker();
+  }
+  return documentWorkerInstance;
+}
+
+export async function stopDocumentIngestionWorker(): Promise<void> {
+  if (documentWorkerInstance) {
+    logger.info('[DocumentWorker] Stopping document ingestion worker...');
+    await documentWorkerInstance.close();
+    documentWorkerInstance = null;
+  }
+}
+
 export function startIngestionWorker(): Worker<IngestionJobData> {
   // The connector registry is process-local: register builtins so
   // CRAWLER_V2=true crawl_provider jobs can resolve their connector. Idempotent.
@@ -435,6 +682,7 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
     workerInstance = createIngestionWorker();
   }
   startWebhookEventWorker();
+  startDocumentIngestionWorker();
   const healthPort = parseInt(process.env.INGESTION_WORKER_HEALTH_PORT || '5004', 10);
   startHealthServer('ingestion-worker', healthPort, {
     checks: {
@@ -446,6 +694,7 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
       return {
         workerRunning: isIngestionWorkerRunning() && isWebhookEventWorkerRunning(),
         webhookWorkerRunning: isWebhookEventWorkerRunning(),
+        documentWorkerRunning: isDocumentIngestionWorkerRunning(),
         queue: queue || 'unknown',
       };
     },
@@ -455,6 +704,7 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
 
 export async function stopIngestionWorker(): Promise<void> {
   await stopWebhookEventWorker();
+  await stopDocumentIngestionWorker();
   if (workerInstance) {
     logger.info('[IngestionWorker] Stopping BullMQ Ingestion Worker...');
     await workerInstance.close();

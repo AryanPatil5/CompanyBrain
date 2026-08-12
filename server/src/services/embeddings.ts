@@ -14,7 +14,13 @@ export interface DLACSearchResult {
   category: string;
   risk_level: string;
   requires_human_gate: boolean;
-  similarity: number;
+  /**
+   * REAL vector similarity only (cosine/pgvector). Null when the result was
+   * produced by a non-vector leg (sparse keyword / skills_sops fallback) —
+   * those results MUST NOT carry a fabricated numeric score pretending to be
+   * semantic similarity (Phase 3 "no fabricated fallback" rule).
+   */
+  similarity: number | null;
   source_document_id?: string;
 }
 
@@ -28,6 +34,37 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
   const cleanText = text.trim();
   if (!cleanText) return null;
   return getAiEmbeddings(cleanText);
+}
+
+/**
+ * Phase 3: bounded-concurrency embedding batching for document pipelines.
+ *
+ * The provider exposes no true batch API (generateEmbeddings joins array
+ * input into ONE vector), so "batching" means running per-text calls with a
+ * bounded concurrency pool instead of a serial loop. Semantics are identical
+ * to the serial path: any failure throws the typed EmbeddingError AFTER the
+ * caller's recordEmbeddingFailure hook (callers choose where to record);
+ * nulls are returned only for empty inputs. Order is preserved.
+ */
+export async function generateEmbeddingsBatch(
+  texts: string[],
+  opts: { concurrency?: number } = {}
+): Promise<(number[] | null)[]> {
+  const concurrency = Math.max(1, opts.concurrency ?? 4);
+  const out: (number[] | null)[] = new Array(texts.length);
+  let cursor = 0;
+
+  async function worker(): Promise<void> {
+    while (cursor < texts.length) {
+      const idx = cursor;
+      cursor += 1;
+      out[idx] = await generateEmbedding(texts[idx]);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, Math.max(texts.length, 1)) }, () => worker());
+  await Promise.all(workers);
+  return out;
 }
 
 /**
@@ -93,7 +130,10 @@ export async function searchVectorContextDLAC(params: {
         category: item.metadata?.category || 'Operations',
         risk_level: item.metadata?.risk_level || 'Low',
         requires_human_gate: item.metadata?.requires_human_gate || false,
-        similarity: item.similarity || 0.9,
+        // Honest similarity: never fabricate a fallback score (Phase 3 rule).
+        // The RPC returns a real pgvector score; a genuine 0/missing stays
+        // null and callers (hybridSearch RRF) treat null as "no score".
+        similarity: item.similarity ?? null,
         source_document_id: item.document_id,
       }));
     }
@@ -145,14 +185,16 @@ async function fallbackInMemoryDLACSearch(
 
     logger.info(`[Retrieval] Retrieved ${filtered.length} SOPs from skills_sops fallback`);
 
-    return filtered.slice(0, matchCount).map((s, idx) => ({
+    return filtered.slice(0, matchCount).map((s) => ({
       id: s.id,
       title: s.title,
       trigger_condition: s.trigger_condition,
       category: s.category || 'Operations',
       risk_level: s.risk_level || 'Low',
       requires_human_gate: s.requires_human_gate || false,
-      similarity: 0.95 - idx * 0.05,
+      // No fabricated similarity: the fallback matched by keyword/existence,
+      // not by embedding distance. Honest null beats a fake score.
+      similarity: null,
       source_document_id: s.id,
     }));
   } catch (err) {

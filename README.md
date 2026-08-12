@@ -226,6 +226,45 @@ Send payloads or trigger webhooks across 7 supported sources:
 > `status: "received"` and the next redelivery (or worker sweep) retries it
 > automatically; webhook acceptance never fails because the queue is down.
 
+> **Phase 3 thread ingestion (claims + grounding):** every webhook thread
+> (and every legacy crawler) funnels through the shared thread tail
+> (`server/src/ingestion/documentPipeline.ts` → `processThreadTail`): it
+> persists a `source_documents` row + chunks, extracts grounded `knowledge_claims`
+> with char-offset evidence, then extracts the SOP. SOPs now carry
+> `confidence_score`, and `GET /api/sops/:id/claims` returns the claims that
+> support the SOP:
+
+> ```bash
+> curl http://localhost:5001/api/sops/<sop-id>/claims \
+>   -H "Authorization: Bearer <session-or-mock token>"
+> # {"sop_id":"<sop-id>","count":2,"claims":[
+> #   {"id":"...","claim_text":"...","confidence":0.9,"chunk_id":"...","evidence":[{"char_start":0,"char_end":120}],...}]}
+> ```
+
+### 📄 Document Upload & Ingest (Phase 3)
+
+Multipart upload → content-addressed object storage → async `parse_document`
+worker (parse → chunk → embed → claims → `extraction_stage=completed`):
+
+```bash
+curl -X POST http://localhost:5001/api/documents/upload \
+  -H "Authorization: Bearer <session-or-mock token>" \
+  -F "file=@./runbook.pdf" \
+  -w "\n%{http_code}\n"        # 202 {"success":true,"document_id":"<uuid>","storage_key":"raw/<ws>/<sha256>.pdf","status":"queued"}
+
+curl http://localhost:5001/api/documents/<document_id>/status \
+  -H "Authorization: Bearer <session-or-mock token>"
+# {"document_id":"<uuid>","status":"queued|parsing|chunking|embedding|claims|completed|ocr_required|failed"}
+```
+
+- `202` on accept; duplicate re-upload of the same content returns `202` with
+  the existing `document_id` + `"deduplicated": true` (worker short-circuits
+  already-completed content).
+- `503` when object storage is not configured, `413` over `MAX_UPLOAD_MB`,
+  `415` for unsupported types, `400` for missing multipart field.
+- OCR-only PDFs move to the explicit terminal `ocr_required` stage — the
+  pipeline never fabricates text.
+
 
 ### 1. Slack
 ```bash

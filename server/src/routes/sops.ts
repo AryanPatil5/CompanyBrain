@@ -385,10 +385,94 @@ router.post('/:id/confirm', async (req: Request, res: Response): Promise<void> =
   }
 });
 
+// ─── GET supporting claims (Phase 3, ADR-T15) ────────────────
+//
+// Returns the atomic claims linked to an SOP (via sop_citations.claim_id)
+// with their char-offset evidence. Workspace-scoped: the SOP itself must
+// belong to the caller's workspace (404 otherwise) and claim/evidence rows
+// are filtered by workspace_id on every query.
+
+router.get('/:id/claims', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const user = (req as AuthenticatedRequest).user!;
+    const workspaceId = user.workspace_id;
+    const client = getTenantClient(req);
+
+    // SOP ownership check (established 404/403 pattern)
+    const { data: checkSop } = await client
+      .from('skills_sops')
+      .select('workspace_id')
+      .eq('id', id)
+      .single();
+
+    if (!checkSop) {
+      res.status(404).json({ error: 'SOP not found' });
+      return;
+    }
+
+    if (checkSop.workspace_id !== workspaceId) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const { data: citations } = await client
+      .from('sop_citations')
+      .select('claim_id')
+      .eq('sop_id', id)
+      .not('claim_id', 'is', null);
+
+    const claimIds = (citations ?? []).map((c) => c.claim_id as string);
+    if (claimIds.length === 0) {
+      res.json({ sop_id: id, claims: [] });
+      return;
+    }
+
+    const { data: claims } = await client
+      .from('knowledge_claims')
+      .select('id, claim_text, claim_type, confidence, status, chunk_id, source_document_id')
+      .eq('workspace_id', workspaceId)
+      .in('id', claimIds)
+      .order('confidence', { ascending: false });
+
+    const { data: evidence } = await client
+      .from('claim_evidence')
+      .select('claim_id, chunk_id, char_start, char_end')
+      .eq('workspace_id', workspaceId)
+      .in('claim_id', claimIds);
+
+    const evidenceByClaim = new Map<string, Array<Record<string, any>>>();
+    for (const ev of evidence ?? []) {
+      const list = evidenceByClaim.get(ev.claim_id) ?? [];
+      list.push({
+        chunk_id: ev.chunk_id,
+        char_start: ev.char_start,
+        char_end: ev.char_end,
+      });
+      evidenceByClaim.set(ev.claim_id, list);
+    }
+
+    const claimsPayload = (claims ?? []).map((c) => ({
+      id: c.id,
+      claim_text: c.claim_text,
+      claim_type: c.claim_type,
+      confidence: Number(c.confidence),
+      status: c.status,
+      chunk_id: c.chunk_id,
+      source_document_id: c.source_document_id,
+      evidence: evidenceByClaim.get(c.id) ?? [],
+    }));
+
+    res.json({ sop_id: id, count: claimsPayload.length, claims: claimsPayload });
+  } catch (err) {
+    logger.error('[SOP Claims Route Error]:', err);
+    res.status(500).json({ error: 'Failed to fetch SOP claims' });
+  }
+});
+
 // ─── GET version history ─────────────────────────────────────
 
-router.get('/:id/versions', async (req: Request, res: Response): Promise<void> => {
-  try {
+router.get('/:id/versions', async (req: Request, res: Response): Promise<void> => {  try {
     const { id } = req.params;
     const user = (req as AuthenticatedRequest).user!;
     const workspaceId = user.workspace_id;

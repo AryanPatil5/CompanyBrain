@@ -52,3 +52,4 @@ const queueOptions: QueueOptions = {
 
 export const ingestionQueue = new Queue('IngestionQueue', queueOptions);
 export const webhookIngestionQueue = new Queue('webhook-ingestion', queueOptions);
+export const documentIngestionQueue = new Queue('document-ingestion', queueOptions);

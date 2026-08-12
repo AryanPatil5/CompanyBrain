@@ -1,7 +1,8 @@
 import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
-import { extractSOPFromThread } from '../extractor.js';
+import { processThreadTail } from '../../ingestion/documentPipeline.js';
+import { linkSopClaimsBestEffort } from '../../knowledge/claimProvenance.js';
 import { createVersion } from '../freshness.js';
 import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
 import { ssrfSafeFetch } from '../security/ssrfGuard.js';
@@ -117,8 +118,18 @@ export async function crawlZendeskTickets(
         ...(commentsText ? [{ user: 'ticket_notes', text: commentsText }] : []),
       ];
 
+      // Phase 3 (B1b): shared thread tail — persists source document +
+      // chunks + grounded claims, then extracts the SOP (ONE
+      // provider-agnostic implementation, shared with durable webhooks).
       try {
-        const extractedSOP = await extractSOPFromThread(ticketTranscript, workspaceId, 'zendesk');
+        const { sourceDocument, extractedSOP } = await processThreadTail({
+          workspaceId,
+          source: 'zendesk',
+          externalId: ticketId,
+          title: `zendesk:${ticketId}`,
+          messages: ticketTranscript,
+          sourceTrust: 'crawled',
+        });
 
         if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
           let sopEmbedding: number[] | null = null;
@@ -143,6 +154,7 @@ export async function crawlZendeskTickets(
             execution_steps: extractedSOP.execution_steps,
             risk_level: extractedSOP.risk_level || 'Medium',
             requires_human_gate: extractedSOP.requires_human_gate || false,
+            confidence_score: extractedSOP.confidence_score,
             status: 'Draft',
             version: 1,
             last_confirmed_at: new Date().toISOString(),
@@ -159,6 +171,13 @@ export async function crawlZendeskTickets(
 
           if (!insertErr && sopData) {
             await createVersion(sopData.id, 'zendesk_crawler', 'initial_extraction');
+            if (sourceDocument) {
+              await linkSopClaimsBestEffort({
+                workspaceId,
+                sopId: sopData.id,
+                sourceDocumentId: sourceDocument.id,
+              });
+            }
             sopsExtracted++;
             logger.info(`[SUCCESS] [Zendesk Crawler] Extracted SOP "${sopData.title}" from Ticket #${ticket.id}`);
           }

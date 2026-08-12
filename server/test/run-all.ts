@@ -83,6 +83,20 @@ const SUITES: SuiteEntry[] = [
   { name: 'services/modelRouter', file: './services/modelRouter.test.js', run: 'runModelRouterTest', timeoutMs: 120_000 },
   { name: 'db/schemaContract', file: './db/schemaContract.test.js', run: 'runSchemaContractTest', timeoutMs: 120_000 },
   { name: 'services/idempotency', file: './services/idempotency.test.js', run: 'runIdempotencyTest', timeoutMs: 120_000 },
+  { name: 'routes/documents', file: './routes/documents.test.js', run: 'runDocumentsRouteTests', timeoutMs: 120_000 },
+  { name: 'workers/documentJob', file: './workers/documentJob.test.js', run: 'runDocumentJobTests', timeoutMs: 120_000 },
+  { name: 'services/docxParser', file: './services/docxParser.test.js', run: 'runDocxParserTests', timeoutMs: 120_000 },
+  { name: 'services/spreadsheetParser', file: './services/spreadsheetParser.test.js', run: 'runSpreadsheetParserTests', timeoutMs: 120_000 },
+  { name: 'services/ocrGateway', file: './services/ocrGateway.test.js', run: 'runOcrGatewayTests', timeoutMs: 120_000 },
+  { name: 'services/noFabricatedFallback', file: './services/noFabricatedFallback.test.js', run: 'runNoFabricatedFallbackTests', timeoutMs: 120_000 },
+  { name: 'storage/storageProvider', file: './storage/storageProvider.test.js', run: 'runStorageProviderTest', timeoutMs: 120_000 },
+  { name: 'knowledge/claimExtractor', file: './knowledge/claimExtractor.test.js', run: 'runClaimExtractorTests', timeoutMs: 120_000 },
+  { name: 'knowledge/claimStore', file: './knowledge/claimStore.test.js', run: 'runClaimStoreTests', timeoutMs: 120_000 },
+  { name: 'knowledge/claimProvenance', file: './knowledge/claimProvenance.test.js', run: 'runClaimProvenanceTests', timeoutMs: 120_000 },
+  { name: 'knowledge/entityResolver', file: './knowledge/entityResolver.test.js', run: 'runEntityResolverTests', timeoutMs: 120_000 },
+  { name: 'routes/sopClaims', file: './routes/sopClaims.test.js', run: 'runSopClaimsRouteTests', timeoutMs: 120_000 },
+  { name: 'knowledge/webhookClaimsE2E', file: './knowledge/webhookClaimsE2E.test.js', run: 'runWebhookClaimsE2ETests', timeoutMs: 120_000 },
+  { name: 'crawlers/crawlerClaimsE2E', file: './crawlers/crawlerClaimsE2E.test.js', run: 'runCrawlerClaimsE2ETests', timeoutMs: 120_000 },
 ];
 
 interface SuiteResult {

@@ -4,7 +4,7 @@ Status: **DONE** — `npm test` is hermetic, deterministic, and CI-ready.
 
 ## Summary
 
-`npm test` (i.e. `tsx test/run-all.ts` inside `server/`) now runs **55 suites / 62 monolith
+`npm test` (i.e. `tsx test/run-all.ts` inside `server/`) now runs **69 suites / 69 monolith
 checks** with **no live network, no Redis, no Postgres/Supabase, no Docker, no paid LLM
 calls**, each suite bounded by a hard per-suite timeout, and the process exits `0` only when
 everything passes. Verified with three consecutive full green runs (all `50 passed, 0 failed`,
@@ -32,9 +32,24 @@ made paid OpenRouter calls when run standalone.
 ## Coverage
 
 - `test/mcp-guardrails.test.ts` monolith (tests 1–58) — all green.
-- 54 standalone suites under `agents/`, `connectors/github/`, `eval/`, `graph/`, `infra/`,
-  `middleware/`, `parsers/`, `retrieval/`, `routes/`, `security/`, `services/`, `skills/`,
-  `workers/`, `workflows/` — all green.
+- 68 standalone suites under `agents/`, `connectors/github/`, `crawlers/`, `eval/`, `graph/`,
+  `infra/`, `knowledge/`, `middleware/`, `parsers/`, `retrieval/`, `routes/`, `security/`,
+  `services/`, `skills/`, `workers/`, `workflows/` — all green.
+
+> Phase 3 additions: `routes/documents` (upload/status), `workers/documentJob`
+> (parse_document processor), `services/docxParser`, `services/spreadsheetParser`,
+> `services/ocrGateway`, `services/noFabricatedFallback` (similarity honesty rule),
+> `knowledge/{claimExtractor,claimStore,claimProvenance,entityResolver}`,
+> `routes/sopClaims`, `knowledge/webhookClaimsE2E`, `crawlers/crawlerClaimsE2E`
+> (shared thread tail: docs → chunks → claims → SOP confidence → claim linkage).
+> The first two MUST defer their app-module imports until after `installHarness()`
+> (see AGENTS.md "HARMLESS-LOOKING HANG GOTCHA") for standalone runs.
+
+> `harness/fakeSupabase.ts` mirrors real Supabase write semantics: `.insert()/.upsert()`
+> chains followed by `.select()/single()` resolve ONLY the rows the write affected
+> (RETURNING), and `.upsert(rows, { onConflict })` updates the matching conflict-key row
+> in place — do not "fix" suites that fail because they assumed the old first-row
+> behavior; the real database behaves like the fake's current semantics.
 
 ### Excluded suites (and why)
 

@@ -75,7 +75,7 @@ graph TB
 | Component | Path | Responsibility |
 |---|---|---|
 | **Entrypoint** | `src/index.ts` | Bootstraps Express, FastMCP, BullMQ ingestion worker, Temporal worker, and background crawler in a single process |
-| **REST Routes** | `src/routes/` | `ingestion.ts` (webhooks + async crawl jobs), `sops.ts` (CRUD + search + approvals + analytics), `integrations.ts` (OAuth connect/disconnect), `webhooks.ts` (event-driven ingestion), `connectors.ts` (signature verification + workspace resolution) |
+| **REST Routes** | `src/routes/` | `ingestion.ts` (webhooks + async crawl jobs), `sops.ts` (CRUD + search + approvals + analytics), `integrations.ts` (OAuth connect/disconnect), `webhooks.ts` (event-driven ingestion), `connectors.ts` (signature verification + workspace resolution), `documents.ts` (Phase 3: multipart upload → content-addressed storage + `document-ingestion` queue; workspace-scoped status probe) |
 | **AI Provider** | `src/services/aiProvider.ts` | Tiered LLM calls: Gemini 2.0 Flash → Ollama llama3.2:3b → OpenRouter ling-3.0-flash |
 | **Embeddings** | `src/services/embeddings.ts` | Generates 1536-dim vectors via Ollama `nomic-embed-text`; falls back to deterministic pseudo-vectors |
 | **Extractor** | `src/services/extractor.ts` | LLM-powered SOP extraction from thread transcripts; Zod schema validation; graph entity/relationship extraction |
@@ -695,6 +695,8 @@ erDiagram
         text content_hash
         uuid raw_thread_id FK → raw_threads
         jsonb raw_metadata
+        text storage_uri
+        text extraction_stage (queued|parsing|chunking|embedding|claims|resolve|completed|ocr_required|failed)
         timestamptz created_at
     }
 
@@ -705,10 +707,68 @@ erDiagram
         text content
         text content_hash
         jsonb metadata
+        text source_object_key
+        text embedding_model
+        text embedding_version
         vector(1536) embedding
         text[] allowed_roles
         text workspace_id
         timestamptz created_at
+    }
+
+    knowledge_claims {
+        uuid id PK
+        uuid workspace_id
+        uuid source_document_id FK → source_documents
+        uuid chunk_id FK → document_chunks
+        text claim_text
+        text claim_type (operational|incident|approval|policy|other)
+        numeric confidence (0..1)
+        text claim_text_hash (dedupe)
+        timestamptz created_at
+    }
+
+    claim_evidence {
+        uuid id PK
+        uuid workspace_id
+        uuid claim_id FK → knowledge_claims
+        uuid chunk_id FK → document_chunks
+        int char_start
+        int char_end
+        timestamptz created_at
+    }
+
+    entities {
+        uuid id PK
+        uuid workspace_id
+        text entity_id (canonical slug, deterministic)
+        text canonical_name
+        text entity_type (Person|System|SOP|Rule|Step|Entity)
+        numeric confidence (derived from sighting volume, 0..1)
+        int times_seen
+        uuid source_document_id FK → source_documents
+        timestamptz first_seen_at
+        timestamptz last_seen_at
+    }
+
+    entity_aliases {
+        uuid id PK
+        uuid workspace_id
+        text entity_id FK → entities
+        text alias
+    }
+
+    entity_relationships {
+        uuid id PK
+        uuid workspace_id
+        text source_entity_id FK → entities
+        text target_entity_id FK → entities
+        text relationship_type (OWNS|REQUIRES|MODIFIES|DEPENDS_ON|EXECUTES)
+        numeric confidence (derived, 0..1)
+        int times_seen
+        uuid source_document_id FK → source_documents
+        jsonb properties
+        timestamptz valid_until
     }
 ```
 
@@ -751,6 +811,12 @@ be run manually in the Supabase SQL Editor. Key schema evolution:
 | `030_github_connector.sql` | GitHub connector: `github_repositories`, `github_sync_state`, `github_indexed_documents` (RLS, SHA-based change detection) |
 | `031_usage_meters_detail.sql` | Per-LLM-request detail columns on `usage_meters` |
 | `032_retire_apache_age.sql` | Drop the Apache AGE extension (ADR-T4) |
+| `033_connectors_registry.sql` | `connector_definitions` + `workspace_connectors` (CRAWLER_V2 registry) |
+| `034_approval_lifecycle.sql` | `pending_approvals` lifecycle columns (action/justification/reviewed_by) |
+| `035_raw_source_events.sql` | Durable webhook deliveries: `raw_source_events` (dedupe key, status, DLQ target) |
+| `036_knowledge_corpus.sql` | Phase 3 corpus: `knowledge_claims`, `claim_evidence`, `entities`, `entity_aliases`, `entity_relationships`, `source_documents`/`document_chunks` extraction-stage columns, `sop_citations.chunk_id`, `sop_confidence_score`-adjacent checks |
+| `037_sop_confidence.sql` | `skills_sops.confidence_score numeric check (0..1)` (Phase 3 B2) |
+| `038_entity_confidence_times_seen.sql` | `times_seen` on `entities`/`entity_relationships`; confidence derived from sighting volume (Phase 3 N5) |
 
 > Historical note: `028_fix_migration_order.sql` was deleted in Phase 1 (Task 2)
 > — it existed only to band-aid the 013 ordering bug, which is fixed directly in
@@ -824,6 +890,78 @@ flowchart TB
 - `setInterval` with configurable `CRAWL_INTERVAL_MS` (default 1 hour)
 - Each cycle: crawl all sources → mark stale SOPs (30-day threshold)
 - Gmail crawl requires connected `integration_credentials` with `status=connected`
+
+### 9.5 Document Ingestion Worker (`parse_document`, Phase 3 — ADR-T6/T15)
+
+Uploaded documents (POST `/api/documents/upload`, route `routes/documents.ts`) are
+stored content-addressed (`raw/{workspace_id}/{sha256}.{ext}`) in object storage,
+recorded in `source_documents` with `extraction_stage='queued'`, and enqueued to the
+`document-ingestion` BullMQ queue (worker started by `startDocumentIngestionWorker()`
+inside the `ingestion-worker` process):
+
+```mermaid
+flowchart LR
+    A[POST /api/documents/upload<br/>multer memory + MIME/size gate] --> B[Content-addressed put<br/>storageProvider seam]
+    B --> C[source_documents row<br/>extraction_stage=queued]
+    C --> D[document-ingestion queue]
+    D --> E[processDocumentIngestionJob]
+    E --> F{extraction_stage checkpoints}
+    F -->|queued -> parsing| G[Parse by MIME]
+    G -->|PDF scanned / empty| H[ocr_required<br/>terminal, no fake text]
+    G -->|text/markdown| I1[chunking: chunkAndPersistDocument<br/>chunks + embeddings]
+    G -->|.docx| I1
+    G -->|xlsx/xls/csv| I1
+    I1 --> I2[embedding]
+    I2 --> I3[claims: extractAndPersistClaims<br/>claims + char-offset evidence]
+    I3 --> J[completed]
+    E -->|any failure| K[failed + rethrow<br/>BullMQ retries -> DLQ]
+```
+
+Key properties:
+- **Resumable stage checkpoints** (`queued → parsing → chunking → embedding →
+  claims → completed | ocr_required | failed`): each pipeline stage is marked
+  on the row as it runs (Phase 3 N3), so a retry resumes from the visible
+  stage; the content-hash short-circuit additionally makes unchanged,
+  completed documents a no-op.
+- **No fabricated extraction** (Phase 3 rule): scanned PDFs land in the explicit
+  `ocr_required` terminal stage instead of receiving invented text; OCR itself is
+  out of scope (gateway `ocrGateway.ts` always returns null).
+- **Parse dispatch** (`parseUploadedContent`): PDF → layout-aware parser with
+  scanned/password detection; `.docx` → mammoth; spreadsheets/CSV → deterministic
+  `header: value` text projection; plain text/markdown → verbatim.
+- **Storage seam**: S3/MinIO in production, in-memory provider for hermetic tests;
+  a missing provider or object fails the job loudly (never silently empty).
+- **Error path**: failures mark the row `failed` and rethrow — BullMQ retries (3,
+  exponential backoff), then routes to `document-ingestion-dlq`.
+
+### 9.6 Thread Ingestion Tail (webhooks + crawlers, Phase 3 — ADR-T15)
+
+All thread-based ingestion funnels through ONE provider-agnostic tail,
+`processThreadTail` in `server/src/ingestion/documentPipeline.ts`, used by
+`processThreadCore` (`services/ingestion/webhookService.ts`, durable webhook
+worker) and by all six legacy crawlers
+(`services/crawlers/{slack,github,linear,zendesk,email,database}.ts`):
+
+```mermaid
+flowchart LR
+    A[Webhook worker / crawler] --> B[processThreadTail]
+    B --> C[formatMessagesAsTranscript]
+    C --> D[persistSourceDocumentWithChunks<br/>source_documents + document_chunks]
+    D --> E[extractAndPersistClaims<br/>knowledge_claims + claim_evidence]
+    E --> F[extractSOPFromThread<br/>schema-validated]
+    F --> G[per-provider insert shell<br/>skills_sops + confidence_score]
+    G --> H[linkSopClaimsBestEffort<br/>sop_citations (claim_id + chunk_id)]
+```
+
+- Every crawled/webhook thread now produces source document + chunks +
+  grounded claims with char-offset evidence, exactly like the upload pipeline.
+- SOPs are written with `confidence_score` (migration 037), and every
+  SOP-creation path links its document's top-confidence claims into
+  `sop_citations` — so `GET /api/sops/:id/claims` returns real data.
+- Webhook linkage failures throw (retryable via the event ledger); crawler
+  linkage is best-effort with a warn (no retry ledger, SOP is kept).
+- The crawler insert shells keep their historical per-provider defaults
+  (category/risk/human-gate); only the extraction/persistence logic is shared.
 
 ---
 

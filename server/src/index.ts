@@ -8,6 +8,7 @@ import sopsRouter from './routes/sops.js';
 import integrationsRouter from './routes/integrations.js';
 import webhooksRouter from './routes/webhooks.js';
 import githubRouter from './routes/github.js';
+import documentsRouter from './routes/documents.js';
 
 import { observabilityMiddleware, getMetricsSnapshot } from './middleware/observability.js';
 import { telemetryMiddleware, getPrometheusMetricsString } from './middleware/telemetry.js';
@@ -82,6 +83,7 @@ app.use('/api/sops', sopsRouter);
 app.use('/api/integrations', integrationsRouter);
 app.use('/api/v1/webhooks', webhooksRouter);
 app.use('/api/github', githubRouter);
+app.use('/api/documents', documentsRouter);
 
 app.get('/health', async (_req, res) => {
   const payload = await buildHealthPayload(

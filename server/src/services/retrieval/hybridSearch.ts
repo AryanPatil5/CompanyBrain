@@ -83,14 +83,17 @@ export async function hybridSearch(params: HybridSearchParams): Promise<HybridSe
         return !s.requires_human_gate && (s.risk_level === 'Low' || s.risk_level === 'Medium');
       });
 
-      return permitted.map((s, idx) => ({
+      return permitted.map((s) => ({
         id: s.id,
         title: s.title,
         trigger_condition: s.trigger_condition,
         category: s.category || 'Operations',
         risk_level: s.risk_level || 'Low',
         requires_human_gate: s.requires_human_gate || false,
-        similarity: 1 - idx * 0.05,
+        // No fabricated similarity: the sparse leg matched by keyword, not by
+        // embedding distance (Phase 3 "no fabricated fallback" rule). Honest
+        // null beats a fake score; RRF ordering uses ranks, not similarity.
+        similarity: null,
       }));
     } catch (err) {
       logger.warn('[HybridSearch Warning] Sparse keyword leg failed:', err);

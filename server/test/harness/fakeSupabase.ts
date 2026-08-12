@@ -64,6 +64,12 @@ class FakeSupabaseQuery {
   // after .update(), so maybeSingle()/single()/then() apply the update and
   // return the updated row(s) instead of only mutating in place.
   private readonly withReturning: boolean;
+  // Mirrors real Postgres INSERT/UPDATE ... RETURNING: set when .select() is
+  // called after .insert()/.upsert(), so resolution returns ONLY the rows
+  // this write affected (real Supabase semantics). Without this flag a
+  // filter-less insert().select().single() wrongly returned the FIRST row in
+  // the table instead of the just-written row as soon as >1 row existed.
+  private readonly pendingWrite: boolean;
 
   constructor(
     table: string,
@@ -72,7 +78,8 @@ class FakeSupabaseQuery {
     filters: QueryFilters = { eq: [], in: [], is: [], ilike: [], lt: [], or: [], not: [], limit: null, order: [] },
     pendingUpdate: Record<string, any> | null = null,
     pendingDelete = false,
-    withReturning = false
+    withReturning = false,
+    pendingWrite = false
   ) {
     this.table = table;
     this.store = store;
@@ -81,6 +88,7 @@ class FakeSupabaseQuery {
     this.pendingUpdate = pendingUpdate;
     this.pendingDelete = pendingDelete;
     this.withReturning = withReturning;
+    this.pendingWrite = pendingWrite;
   }
 
   private cloneFilters(): QueryFilters {
@@ -97,61 +105,61 @@ class FakeSupabaseQuery {
     };
   }
 
-  select(cols: string) {
-    return new FakeSupabaseQuery(this.table, this.store, cols.split(',').map((c) => c.trim()), this.cloneFilters(), this.pendingUpdate, this.pendingDelete, this.pendingUpdate !== null);
+  select(cols?: string) {
+    return new FakeSupabaseQuery(this.table, this.store, (cols ?? '*').split(',').map((c) => c.trim()), this.cloneFilters(), this.pendingUpdate, this.pendingDelete, this.pendingUpdate !== null, this.pendingWrite);
   }
   eq(col: string, val: unknown) {
     const f = this.cloneFilters();
     f.eq.push([col, val]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   in(col: string, vals: unknown[]) {
     const f = this.cloneFilters();
     f.in.push([col, vals]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   is(col: string, val: unknown) {
     const f = this.cloneFilters();
     f.is.push([col, val]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   ilike(col: string, pattern: string) {
     const f = this.cloneFilters();
     f.ilike.push([col, pattern]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   lt(col: string, val: unknown) {
     const f = this.cloneFilters();
     f.lt.push([col, val]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   or(filterStr: string) {
     const f = this.cloneFilters();
     f.or.push(parseOrFilter(filterStr));
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   not(col: string, op: string, val: unknown) {
     const f = this.cloneFilters();
     f.not.push([col, op, val]);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   order(col: string, opts: { ascending?: boolean } = {}) {
     const f = this.cloneFilters();
     f.order.push([col, opts.ascending === false ? 'desc' : 'asc']);
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
   limit(n: number) {
     const f = this.cloneFilters();
     f.limit = n;
-    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, f, this.pendingUpdate, this.pendingDelete, this.withReturning, this.pendingWrite);
   }
-  upsert(rows: unknown) {
-    this.store.upsert(this.table, rows);
-    return this;
+  upsert(rows: unknown, options?: { onConflict?: string }) {
+    this.store.upsert(this.table, rows, options?.onConflict);
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, this.cloneFilters(), null, false, false, true);
   }
   insert(rows: unknown) {
     this.store.insert(this.table, rows);
-    return this;
+    return new FakeSupabaseQuery(this.table, this.store, this.selectCols, this.cloneFilters(), null, false, false, true);
   }
   update(patch: unknown) {
     return new FakeSupabaseQuery(this.table, this.store, this.selectCols, this.cloneFilters(), patch as Record<string, any>, false, false);
@@ -164,14 +172,14 @@ class FakeSupabaseQuery {
       const rows = this.store.updateMatchingReturning(this.table, this.pendingUpdate, this.filters);
       return Promise.resolve({ data: rows[0] ?? null, error: null });
     }
-    return this.store.resolve(this.table, this.selectCols, this.filters, true);
+    return this.store.resolve(this.table, this.selectCols, this.filters, true, false, this.pendingWrite);
   }
   single() {
     if (this.pendingUpdate && this.withReturning) {
       const rows = this.store.updateMatchingReturning(this.table, this.pendingUpdate, this.filters);
       return Promise.resolve({ data: rows.length >= 1 ? rows[0] : null, error: null });
     }
-    return this.store.resolve(this.table, this.selectCols, this.filters, false, true);
+    return this.store.resolve(this.table, this.selectCols, this.filters, false, true, this.pendingWrite);
   }
   then(resolve: (value: any) => any, reject?: (reason?: any) => any) {
     if (this.pendingDelete) {
@@ -186,12 +194,19 @@ class FakeSupabaseQuery {
       this.store.updateMatching(this.table, this.pendingUpdate, this.filters);
       return Promise.resolve({ data: null, error: null }).then(resolve, reject);
     }
-    return this.store.resolve(this.table, this.selectCols, this.filters, false).then(resolve, reject);
+    return this.store.resolve(this.table, this.selectCols, this.filters, false, false, this.pendingWrite).then(resolve, reject);
   }
 }
 
 class FakeSupabaseStore {
   private readonly tables = new Map<string, Row[]>();
+  /** Ids written by the most recent insert/upsert per table (RETURNING scope). */
+  private readonly lastWrites = new Map<string, string[]>();
+
+  clearAll(): void {
+    this.tables.clear();
+    this.lastWrites.clear();
+  }
 
   from(table: string) {
     return new FakeSupabaseQuery(table, this);
@@ -208,24 +223,41 @@ class FakeSupabaseStore {
 
   insert(table: string, payload: unknown): void {
     const rows = Array.isArray(payload) ? payload : [payload];
+    const ids: string[] = [];
     for (const row of rows) {
       // Mirrors real Postgres `id uuid primary key default gen_random_uuid()`.
       if (row.id == null) row.id = crypto.randomUUID();
       this.tableRows(table).push({ ...row });
+      ids.push(row.id);
     }
+    this.lastWrites.set(table, ids);
   }
 
-  upsert(table: string, payload: unknown): void {
+  upsert(table: string, payload: unknown, onConflict?: string): void {
     const rows = Array.isArray(payload) ? payload : [payload];
+    const conflictCols = onConflict ? onConflict.split(',').map((c) => c.trim()) : [];
+    const ids: string[] = [];
     for (const row of rows) {
       if (row.id == null) row.id = crypto.randomUUID();
-      const existing = this.tableRows(table).find((r) => r.id === (row as Row).id);
+      let existing: Row | undefined;
+      if (conflictCols.length > 0) {
+        // Mirrors Postgres ON CONFLICT (<cols>): match against the conflict
+        // key columns (not the payload id).
+        existing = this.tableRows(table).find((r) => conflictCols.every((c) => r[c] === (row as Row)[c]));
+      }
+      if (!existing) {
+        existing = this.tableRows(table).find((r) => r.id === (row as Row).id);
+      }
       if (existing) {
-        Object.assign(existing, row);
+        // ON CONFLICT DO UPDATE ... RETURNING keeps the existing row's id.
+        Object.assign(existing, { ...row, id: existing.id });
+        ids.push(existing.id);
       } else {
         this.tableRows(table).push({ ...row });
+        ids.push(row.id);
       }
     }
+    this.lastWrites.set(table, ids);
   }
 
   update(table: string, patch: Record<string, any>): void {
@@ -339,8 +371,13 @@ class FakeSupabaseStore {
     return out;
   }
 
-  resolve(table: string, cols: string[], filters: QueryFilters, maybe: boolean, single = false): Promise<{ data: Row | Row[] | null; error: null }> {
+  resolve(table: string, cols: string[], filters: QueryFilters, maybe: boolean, single = false, pendingWrite = false): Promise<{ data: Row | Row[] | null; error: null }> {
     let rows = this.tableRows(table).filter((r) => this.matches(r, filters));
+    if (pendingWrite) {
+      // INSERT/UPDATE ... RETURNING: only the rows this write affected.
+      const written = this.lastWrites.get(table) ?? [];
+      rows = rows.filter((r) => written.includes(r.id));
+    }
     if (filters.order.length > 0) {
       for (const [col, dir] of [...filters.order].reverse()) {
         rows = [...rows].sort((a, b) => {
@@ -363,9 +400,24 @@ class FakeSupabaseStore {
   }
 }
 
+let activeStore: FakeSupabaseStore | null = null;
+
 export async function installFakeSupabase(): Promise<void> {
   const { supabase, supabaseAnon } = await import('../../src/config/supabase.js');
   const store = new FakeSupabaseStore();
+  activeStore = store;
   (supabase as any).from = store.from.bind(store);
   if (supabaseAnon) (supabaseAnon as any).from = store.from.bind(store);
+}
+
+/**
+ * Test isolation seam: clears every table in the shared in-memory store.
+ * The store is process-global across suites in run-all.ts, so a suite whose
+ * assertions depend on empty tables (filter-less `.single()` resolution, dense
+ * vector legs reading every chunk) must reset at start to behave identically
+ * standalone and under the runner. Suites appended AFTER the resetting suite
+ * still see the resetting suite's own rows — order resets early.
+ */
+export function resetFakeSupabaseStore(): void {
+  activeStore?.clearAll();
 }

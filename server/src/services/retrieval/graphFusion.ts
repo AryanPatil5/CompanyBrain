@@ -45,9 +45,14 @@ export async function extractEntitiesAndTraverse(
 
   const matchedNodeIds = new Set<string>();
 
+  // Phase 3 (B4): graph projection node ids are workspace-namespaced
+  // (`${workspace_id}:${canonical_slug}`) because graph_nodes.id is a global
+  // PK — the bare canonical slug never matches a row id. Match the namespaced
+  // form here; the DB name-match scan below still covers natural-language
+  // queries whose text doesn't canonicalize to the stored slug.
   const canonical = canonicalizeEntity(queryText);
   if (canonical && canonical !== 'unnamed_entity') {
-    matchedNodeIds.add(canonical);
+    matchedNodeIds.add(`${workspaceId}:${canonical}`);
   }
 
   try {

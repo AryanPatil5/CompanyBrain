@@ -388,7 +388,7 @@ Every differentiator downstream — chunk-level retrieval, per-claim citations, 
 - `server/src/ingestion/documentPipeline.ts`, `server/src/knowledge/{claimExtractor,claimStore,entityResolver}.ts`
 - `server/src/routes/documents.ts`
 - `server/src/services/parsers/{docxParser,spreadsheetParser,ocrGateway}.ts`
-- `server/supabase/031_knowledge_corpus.sql`
+- `server/supabase/036_knowledge_corpus.sql` (originally planned as `031`; 031 was taken by `usage_meters_detail`, so the corpus migration landed as 036 — the runner discovers by filename order, so numbering is the only coupling)
 - Tests: `server/test/knowledge/{claimExtractor,claimProvenance,entityResolver}.test.ts`, `server/test/integration/chunkIngestion.integration.test.ts`, `server/test/routes/documents.test.ts`
 
 ### Database Changes
@@ -1449,7 +1449,7 @@ Exact:
    | 0 | `029_foundation_hardening.sql` (AGE RPC drop, graph indexes, `usage_meters`, `schema_migrations` compat notes) |
    | 1 | `030_schema_repairs.sql` + migrations runner + `idempotency_keys` |
    | 2 | `031_connector_sync_tables.sql` |
-   | 3 | `031_knowledge_corpus.sql` (extend into `032`) |
+    | 3 | `036_knowledge_corpus.sql` (extends through `038`: corpus + `037_sop_confidence` + `038_entity_confidence_times_seen`) |
    | 4 | `031_fts_and_search_metadata.sql` (extend into `032`) |
    | 5 | `031_authorization_and_secrets.sql` (extend into `032`) |
    | 6 | `031_durable_agent_runtime.sql` (extend into `032`) |

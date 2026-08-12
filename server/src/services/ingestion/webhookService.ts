@@ -1,10 +1,11 @@
 import { logger } from '../../logger.js';
 import crypto from 'node:crypto';
 import { supabase } from '../../config/supabase.js';
-import { extractSOPFromThread } from '../extractor.js';
+import { resolveEntitiesForDocument } from '../../knowledge/entityResolver.js';
+import { processThreadTail } from '../../ingestion/documentPipeline.js';
+import { linkDocumentClaimsToSop } from '../../knowledge/claimProvenance.js';
 import { detectConflict, createVersion } from '../freshness.js';
 import { generateEmbedding, recordEmbeddingFailure } from '../embeddings.js';
-import { formatMessagesAsTranscript, persistSourceDocumentWithChunks } from '../../ingestion/sourceObjects.js';
 import { idempotencyKeyFor } from '../idempotency.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ThreadPayload } from '../connectors.js';
@@ -333,31 +334,34 @@ export async function processThreadCore(
     throw new Error(`Database storage error for raw thread: ${rawErr.message}`);
   }
 
-  const sourceDocument = await persistSourceDocumentWithChunks({
+  const { sourceDocument, extractedSOP } = await processThreadTail({
     workspaceId: workspace_id,
     source,
     externalId: external_thread_id,
     title: `${source}:${channel_or_project}:${external_thread_id}`,
-    text: formatMessagesAsTranscript(messages),
+    messages,
+    sourceTrust,
     rawThreadId: rawThread.id,
-    metadata: {
-      channel_or_project,
-      message_count: messages.length,
-      source_trust: sourceTrust,
-    },
+    metadata: { channel_or_project },
     client,
   });
 
-  // Extract SOP via LLM; schema-validated. null means "no high-confidence SOP".
-  let extractedSOP;
-  try {
-    extractedSOP = await extractSOPFromThread(messages, workspace_id, source, sourceTrust);
-  } catch (err) {
-    throw new Error(`SOP extraction failed schema validation: ${err instanceof Error ? err.message : String(err)}`);
-  }
-
   if (!extractedSOP) {
     return { outcome: 'no_sop', rawThreadId: rawThread.id };
+  }
+
+  // Phase 3 (ADR-T15): resolve the SOP's entity/relationship mentions into the
+  // canonical corpus tables and project enum-compatible relationships into the
+  // legacy graph. Canonical write failures fail the job (retryable); graph
+  // projection failures are logged only, never fatal.
+  if ((extractedSOP.entities?.length ?? 0) > 0 || (extractedSOP.relationships?.length ?? 0) > 0) {
+    await resolveEntitiesForDocument({
+      workspaceId: workspace_id,
+      sourceDocumentId: sourceDocument?.id ?? rawThread.id,
+      entities: extractedSOP.entities ?? [],
+      relationships: extractedSOP.relationships ?? [],
+      client,
+    });
   }
 
   // Conflict detection — check if this SOP duplicates an existing one using pgvector
@@ -368,6 +372,18 @@ export async function processThreadCore(
       sop_id: conflict.matching_sop_id,
       raw_thread_id: rawThread.id,
     });
+
+    // Phase 3 (B3): ground the matched SOP in the document's claims. Throws on
+    // failure so the event retries (idempotent (sop_id, claim_id) upsert); the
+    // retry re-enters the conflict path and converges.
+    if (sourceDocument) {
+      await linkDocumentClaimsToSop({
+        workspaceId: workspace_id,
+        sopId: conflict.matching_sop_id,
+        sourceDocumentId: sourceDocument.id,
+        client,
+      });
+    }
 
     await supabase.from('raw_threads').update({ is_processed: true }).eq('id', rawThread.id);
 
@@ -398,6 +414,9 @@ export async function processThreadCore(
     execution_steps: extractedSOP.execution_steps,
     risk_level: extractedSOP.risk_level || 'Low',
     requires_human_gate: extractedSOP.requires_human_gate || false,
+    // Phase 3 (B2): persist the extraction confidence the extractor computed
+    // but never stored (migration 037).
+    confidence_score: extractedSOP.confidence_score,
     source_doc_id: sourceDocument?.id || rawThread.id,
     status: 'Draft',
     version: 1,
@@ -423,6 +442,7 @@ export async function processThreadCore(
     delete insertPayload.embedding;
     delete insertPayload.risk_level;
     delete insertPayload.requires_human_gate;
+    delete insertPayload.confidence_score;
 
     const retry = await supabase.from('skills_sops').insert(insertPayload).select().single();
     sopData = retry.data;
@@ -441,6 +461,20 @@ export async function processThreadCore(
     sop_id: sopData.id,
     raw_thread_id: rawThread.id,
   });
+
+  // Phase 3 (B3): ground the new SOP in the document's claims — the SOP is
+  // ungrounded until the top-confidence claims of its source document are
+  // linked via sop_citations.claim_id (plus the claim's chunk_id). Throws on
+  // failure so the event retries; a retry converges idempotently via
+  // detectConflict -> sop_linked -> linkage.
+  if (sourceDocument) {
+    await linkDocumentClaimsToSop({
+      workspaceId: workspace_id,
+      sopId: sopData.id,
+      sourceDocumentId: sourceDocument.id,
+      client,
+    });
+  }
 
   await supabase.from('raw_threads').update({ is_processed: true }).eq('id', rawThread.id);
 

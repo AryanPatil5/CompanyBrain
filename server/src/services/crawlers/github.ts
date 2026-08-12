@@ -1,7 +1,8 @@
 import { logger } from '../../logger.js';
 import dotenv from 'dotenv';
 import { supabase } from '../../config/supabase.js';
-import { extractSOPFromThread } from '../extractor.js';
+import { processThreadTail } from '../../ingestion/documentPipeline.js';
+import { linkSopClaimsBestEffort } from '../../knowledge/claimProvenance.js';
 import { createVersion } from '../freshness.js';
 import { generateEmbedding, recordEmbeddingFailure, EmbeddingError } from '../embeddings.js';
 import { ssrfSafeFetch } from '../security/ssrfGuard.js';
@@ -147,7 +148,17 @@ export async function crawlGithubPostMortems(
         ];
 
         try {
-          const extractedSOP = await extractSOPFromThread(issueTranscript, workspaceId, 'github');
+          // Phase 3 (B1b): shared thread tail — persists source document +
+          // chunks + grounded claims, then extracts the SOP (ONE
+          // provider-agnostic implementation, shared with durable webhooks).
+          const { sourceDocument, extractedSOP } = await processThreadTail({
+            workspaceId,
+            source: 'github',
+            externalId: issueId,
+            title: `github:${repo}:${issueId}`,
+            messages: issueTranscript,
+            sourceTrust: 'crawled',
+          });
           if (extractedSOP && extractedSOP.is_valid_sop && extractedSOP.confidence_score >= 0.4) {
             let sopEmbedding: number[] | null = null;
             try {
@@ -171,6 +182,7 @@ export async function crawlGithubPostMortems(
               execution_steps: extractedSOP.execution_steps,
               risk_level: extractedSOP.risk_level || 'High',
               requires_human_gate: extractedSOP.requires_human_gate || true,
+              confidence_score: extractedSOP.confidence_score,
               status: 'Draft',
               version: 1,
               last_confirmed_at: new Date().toISOString(),
@@ -187,6 +199,13 @@ export async function crawlGithubPostMortems(
 
             if (!insertErr && sopData) {
               await createVersion(sopData.id, 'github_crawler', 'initial_extraction');
+              if (sourceDocument) {
+                await linkSopClaimsBestEffort({
+                  workspaceId,
+                  sopId: sopData.id,
+                  sourceDocumentId: sourceDocument.id,
+                });
+              }
               sopsExtracted++;
             }
           }
