@@ -20,7 +20,8 @@
     "migrate": "tsx src/db/migrator.ts",
     "migrate:status": "tsx src/db/migrator.ts status",
     "migrate:rollback": "tsx src/db/migrator.ts rollback-last",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "dev:claims-backfill-worker": "PROCESSES=claims-backfill-worker tsx watch src/bootstrap.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",

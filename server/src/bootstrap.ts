@@ -24,6 +24,7 @@ export const KNOWN_PROCESSES = [
   'ingestion-worker',
   'github-sync-worker',
   'temporal-worker',
+  'claims-backfill-worker',
 ] as const;
 
 export type ProcessName = (typeof KNOWN_PROCESSES)[number];
@@ -38,6 +39,7 @@ const DEFAULT_DEV_PROCESSES: ProcessName[] = [
   'ingestion-worker',
   'github-sync-worker',
   'temporal-worker',
+  'claims-backfill-worker',
 ];
 
 let initialized = false;
@@ -114,6 +116,11 @@ async function startProcess(name: ProcessName): Promise<void> {
       await startTemporalWorker();
       break;
     }
+    case 'claims-backfill-worker': {
+      const { startClaimsBackfillWorker } = await import('./workers/claimsBackfillWorker.js');
+      startClaimsBackfillWorker();
+      break;
+    }
   }
   startedProcesses.add(name);
   logger.info(`Process started: ${name}`);
@@ -152,6 +159,11 @@ async function stopProcess(name: string): Promise<void> {
     case 'temporal-worker': {
       const { stopTemporalWorker } = await import('./workers/temporalWorker.js');
       await stopTemporalWorker();
+      break;
+    }
+    case 'claims-backfill-worker': {
+      const { stopClaimsBackfillWorker } = await import('./workers/claimsBackfillWorker.js');
+      await stopClaimsBackfillWorker();
       break;
     }
   }

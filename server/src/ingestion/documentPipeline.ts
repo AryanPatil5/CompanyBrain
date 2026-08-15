@@ -17,6 +17,7 @@ import { chunkText, TextChunk } from './chunker.js';
 import { persistParsedDocument, persistSourceDocumentWithChunks, formatMessagesAsTranscript, PersistedSourceDocument } from './sourceObjects.js';
 import { extractClaimsFromChunk, ExtractedClaim } from '../knowledge/claimExtractor.js';
 import { persistClaims } from '../knowledge/claimStore.js';
+import { stampClaimsDerived } from './claimsBackfill.js';
 import { resolveEntitiesForDocument, ResolveEntitiesInput } from '../knowledge/entityResolver.js';
 import { extractSOPFromThread, ExtractedSOP } from '../services/extractor.js';
 
@@ -268,6 +269,15 @@ export async function processThreadTail(input: ThreadTailInput): Promise<ThreadT
       },
       { document: sourceDocument, chunks: sourceDocument.chunks ?? [] }
     );
+
+    // Claims checkpoint (migration 039): a successful derive stamps the row so
+    // the claims-backfill worker never re-derives this document (idempotent
+    // either way, but this avoids wasting LLM calls on every sweep).
+    await stampClaimsDerived({
+      documentId: sourceDocument.id,
+      workspaceId: input.workspaceId,
+      client,
+    });
   }
 
   let extractedSOP: ExtractedSOP | null = null;

@@ -23,6 +23,12 @@ import { updateEventStatus } from '../services/ingestion/webhookService.js';
 import { dispatchConnectorSync, isCrawlerV2Enabled } from '../connectors/registry.js';
 import { registerBuiltinConnectors } from '../connectors/register.js';
 import { chunkAndPersistDocument, extractAndPersistClaims } from '../ingestion/documentPipeline.js';
+import { stampClaimsDerived } from '../ingestion/claimsBackfill.js';
+import {
+  startEmbeddingBackfillWorker,
+  stopEmbeddingBackfillWorker,
+  embeddingBackfillHealthDetails,
+} from './embeddingBackfillWorker.js';
 import { parseDocument } from '../services/parsers/documentParser.js';
 import { parseDocx } from '../services/parsers/docxParser.js';
 import { parseSpreadsheet } from '../services/parsers/spreadsheetParser.js';
@@ -593,6 +599,9 @@ export async function processDocumentIngestionJob(job: Job<DocumentIngestionJobD
     );
 
     const documentId = chunkStage.document?.id ?? document_id;
+    // Claims checkpoint (migration 039): successful derive stamps the row so
+    // the claims-backfill worker never re-derives this document.
+    await stampClaimsDerived({ documentId, workspaceId: workspace_id });
     await markExtractionStage(documentId, workspace_id, 'completed');
     await job.updateProgress(100);
 
@@ -683,6 +692,7 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
   }
   startWebhookEventWorker();
   startDocumentIngestionWorker();
+  startEmbeddingBackfillWorker();
   const healthPort = parseInt(process.env.INGESTION_WORKER_HEALTH_PORT || '5004', 10);
   startHealthServer('ingestion-worker', healthPort, {
     checks: {
@@ -696,6 +706,7 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
         webhookWorkerRunning: isWebhookEventWorkerRunning(),
         documentWorkerRunning: isDocumentIngestionWorkerRunning(),
         queue: queue || 'unknown',
+        ...embeddingBackfillHealthDetails(),
       };
     },
   });
@@ -705,6 +716,7 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
 export async function stopIngestionWorker(): Promise<void> {
   await stopWebhookEventWorker();
   await stopDocumentIngestionWorker();
+  await stopEmbeddingBackfillWorker();
   if (workerInstance) {
     logger.info('[IngestionWorker] Stopping BullMQ Ingestion Worker...');
     await workerInstance.close();

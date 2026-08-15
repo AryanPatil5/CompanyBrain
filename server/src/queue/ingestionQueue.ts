@@ -53,3 +53,10 @@ const queueOptions: QueueOptions = {
 export const ingestionQueue = new Queue('IngestionQueue', queueOptions);
 export const webhookIngestionQueue = new Queue('webhook-ingestion', queueOptions);
 export const documentIngestionQueue = new Queue('document-ingestion', queueOptions);
+// Phase 3 (ADR-T15): claims backfill — one `batch` job per sweep, consumed by
+// the claims-backfill-worker process with concurrency 1.
+export const claimsBackfillQueue = new Queue('claims-backfill', queueOptions);
+// Phase 4 T2: embedding backfill — one `batch` job per sweep via a BullMQ v6
+// job scheduler, consumed inside the ingestion-worker process (no topology
+// change, roadmap Phase 4). Cursor resume via scheduler template re-upsert.
+export const embeddingBackfillQueue = new Queue('embedding-backfill', queueOptions);

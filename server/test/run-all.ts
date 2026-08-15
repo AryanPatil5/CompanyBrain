@@ -86,6 +86,8 @@ const SUITES: SuiteEntry[] = [
   { name: 'services/idempotency', file: './services/idempotency.test.js', run: 'runIdempotencyTest', timeoutMs: 120_000 },
   { name: 'routes/documents', file: './routes/documents.test.js', run: 'runDocumentsRouteTests', timeoutMs: 120_000 },
   { name: 'workers/documentJob', file: './workers/documentJob.test.js', run: 'runDocumentJobTests', timeoutMs: 120_000 },
+  { name: 'workers/claimsBackfill', file: './workers/claimsBackfill.test.js', run: 'runClaimsBackfillTests', timeoutMs: 120_000 },
+  { name: 'workers/embeddingBackfill', file: './workers/embeddingBackfill.test.js', run: 'runEmbeddingBackfillTests', timeoutMs: 120_000 },
   { name: 'services/docxParser', file: './services/docxParser.test.js', run: 'runDocxParserTests', timeoutMs: 120_000 },
   { name: 'services/spreadsheetParser', file: './services/spreadsheetParser.test.js', run: 'runSpreadsheetParserTests', timeoutMs: 120_000 },
   { name: 'services/ocrGateway', file: './services/ocrGateway.test.js', run: 'runOcrGatewayTests', timeoutMs: 120_000 },
