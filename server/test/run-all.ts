@@ -81,6 +81,7 @@ const SUITES: SuiteEntry[] = [
   { name: 'connectors/webhookDurability', file: './connectors/webhookDurability.test.js', run: 'runWebhookDurabilityTest', timeoutMs: 120_000 },
   { name: 'services/auditLogger', file: './services/auditLogger.test.js', run: 'runAuditLoggerTest', timeoutMs: 120_000 },
   { name: 'services/modelRouter', file: './services/modelRouter.test.js', run: 'runModelRouterTest', timeoutMs: 120_000 },
+  { name: 'services/embeddingProvider', file: './services/embeddingProvider.test.js', run: 'runEmbeddingProviderTests', timeoutMs: 120_000 },
   { name: 'db/schemaContract', file: './db/schemaContract.test.js', run: 'runSchemaContractTest', timeoutMs: 120_000 },
   { name: 'services/idempotency', file: './services/idempotency.test.js', run: 'runIdempotencyTest', timeoutMs: 120_000 },
   { name: 'routes/documents', file: './routes/documents.test.js', run: 'runDocumentsRouteTests', timeoutMs: 120_000 },

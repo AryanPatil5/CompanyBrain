@@ -1,18 +1,15 @@
 import { logger } from '../logger.js';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '../config/supabase.js';
-import { generateEmbedding, generateEmbeddingsBatch, recordEmbeddingFailure, EmbeddingError } from '../services/embeddings.js';
+import { generateEmbeddingResult, generateEmbeddingResultsBatch, recordEmbeddingFailure, EmbeddingError, EmbeddingResult } from '../services/embeddings.js';
 import { chunkText, hashContent, TextChunk } from './chunker.js';
 
 /**
- * Phase 3: the model/version recorded on every persisted chunk embedding.
- * The provider model comes from EMBEDDING_MODEL (same env the embedding
- * provider reads); the version identifies the pipeline's embedding write
- * generation so retrieval can filter on embedding_model/embedding_version
- * when the provider swaps in Phase 4.
+ * Chunked out: the model/version persisted on document_chunks rows is the
+ * EXACT metadata returned by the embedding provider that generated that
+ * vector (EmbeddingResult.model/version) — never re-inferred from
+ * environment variables at persistence time. See persistDocumentCore.
  */
-export const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
-export const EMBEDDING_VERSION = 'v1';
 
 /**
  * Thrown when the document_chunks write fails after embeddings succeeded.
@@ -55,8 +52,6 @@ export interface PersistParsedDocumentInput extends PersistSourceDocumentInput {
    * chunks entirely. Opt-in ONLY (legacy flows keep their exact behavior).
    */
   skipUnchangedContent?: boolean;
-  /** Bounded-concurrency embedding batching (Phase 3). */
-  embedBatchConcurrency?: number;
 }
 
 export interface PersistedSourceDocument {
@@ -112,7 +107,7 @@ async function findUnchangedCompletedDocument(
 async function persistDocumentCore(
   input: PersistSourceDocumentInput,
   chunks: TextChunk[],
-  embed: (chunk: TextChunk) => Promise<number[] | null>,
+  embed: (chunk: TextChunk) => Promise<EmbeddingResult | null>,
   extra: { sourceObjectKey?: string; storageUri?: string } = {}
 ): Promise<PersistedSourceDocument | null> {
   const client = input.client || supabase;
@@ -160,7 +155,7 @@ async function persistDocumentCore(
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      let embedding: number[] | null = null;
+      let embedding: EmbeddingResult | null = null;
       try {
         embedding = await embed(chunk);
         if (embedding) embeddingSuccessCount++;
@@ -185,10 +180,12 @@ async function persistDocumentCore(
         token_count_estimate: chunk.token_count_estimate,
         metadata: chunk.metadata,
         allowed_roles: allowedRoles,
-        embedding,
+        embedding: embedding?.vector ?? null,
         source_object_key: extra.sourceObjectKey || null,
-        embedding_model: EMBEDDING_MODEL,
-        embedding_version: EMBEDDING_VERSION,
+        // Source of truth: the exact model/version reported by the provider
+        // that produced this vector (never re-read from env at write time).
+        embedding_model: embedding?.model ?? null,
+        embedding_version: embedding?.version ?? null,
         updated_at: new Date().toISOString(),
       });
     }
@@ -267,9 +264,9 @@ export async function persistSourceDocumentWithChunks(
     },
   });
 
-  // Legacy embedder: serial per-chunk generateEmbedding with the exact
+  // Legacy embedder: serial per-chunk generateEmbeddingResult with the exact
   // failure semantics the webhook/github flows have always had.
-  return persistDocumentCore(input, chunks, async (chunk) => generateEmbedding(chunk.content));
+  return persistDocumentCore(input, chunks, async (chunk) => generateEmbeddingResult(chunk.content));
 }
 
 /**
@@ -291,12 +288,10 @@ export async function persistParsedDocument(
     }
   }
 
-  const embedder = async (chunk: TextChunk): Promise<number[] | null> => {
+  const embedder = async (chunk: TextChunk): Promise<EmbeddingResult | null> => {
     // One-shot batch per call keeps failure semantics identical to the
     // serial path while bounding concurrency across chunk embeddings.
-    const results = await generateEmbeddingsBatch([chunk.content], {
-      concurrency: input.embedBatchConcurrency,
-    });
+    const results = await generateEmbeddingResultsBatch([chunk.content]);
     return results[0];
   };
 

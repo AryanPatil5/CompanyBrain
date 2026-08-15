@@ -1,5 +1,6 @@
 import { logger } from '../../logger.js';
-import { generateEmbeddings, generateText } from '../aiProvider.js';
+import { generateText } from '../aiProvider.js';
+import { generateEmbedding } from '../embeddings.js';
 import { supabase } from '../../config/supabase.js';
 
 export interface EntityMatchResult {
@@ -45,7 +46,8 @@ export async function registerEntityVector(
   type: string,
   workspaceId: string
 ): Promise<void> {
-  const embedding = await generateEmbeddings(name);
+  const embedding = await generateEmbedding(name);
+  if (!embedding) throw new Error('Failed to generate embedding for entity');
   entityVectorRegistry.push({
     id,
     name,
@@ -69,7 +71,8 @@ export async function findSimilarEntities(
   }
 
   const cleanName = entityName.trim();
-  const queryEmbedding = await generateEmbeddings(cleanName);
+  const queryEmbedding = await generateEmbedding(cleanName);
+  if (!queryEmbedding) throw new Error('Failed to generate embedding for query');
 
   // 1. Vector Search Pre-Filtering (Cosine Similarity >= 0.85)
   const candidates: { node: StoredEntityVector; similarity: number }[] = [];

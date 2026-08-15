@@ -117,7 +117,8 @@ export type EmbeddingErrorCode =
   | 'embedding_provider_unreachable'
   | 'embedding_provider_http_error'
   | 'embedding_invalid_response'
-  | 'embedding_dimension_mismatch';
+  | 'embedding_dimension_mismatch'
+  | 'embedding_provider_config_error';
 
 /**
  * Typed error for embedding generation failures. Thrown instead of silently
@@ -130,11 +131,12 @@ export class EmbeddingError extends Error {
   readonly retryable: boolean;
   readonly status?: number;
   readonly dimensions?: number;
+  readonly retryAfterMs?: number;
 
   constructor(
     code: EmbeddingErrorCode,
     message: string,
-    options: { provider?: string; retryable?: boolean; status?: number; dimensions?: number } = {}
+    options: { provider?: string; retryable?: boolean; status?: number; dimensions?: number; retryAfterMs?: number } = {}
   ) {
     super(message);
     this.name = 'EmbeddingError';
@@ -143,19 +145,8 @@ export class EmbeddingError extends Error {
     this.retryable = options.retryable ?? false;
     this.status = options.status;
     this.dimensions = options.dimensions;
+    this.retryAfterMs = options.retryAfterMs;
   }
-}
-
-function normalizeEmbeddingFailure(err: unknown): EmbeddingError {
-  if (err instanceof EmbeddingError) return err;
-
-  const message = err instanceof Error ? err.message : String(err);
-  const name = err instanceof Error ? err.name : '';
-  if (name === 'AbortError' || /aborted|timed out|timeout/i.test(message)) {
-    return new EmbeddingError('embedding_provider_unreachable', `Embedding request timed out: ${message}`, { retryable: true });
-  }
-  // Network-level failures (connection refused, DNS, etc.) are retryable.
-  return new EmbeddingError('embedding_provider_unreachable', `Embedding request failed: ${message}`, { retryable: true });
 }
 
 function normalizeError(provider: string, err: unknown): ProviderError {
@@ -565,90 +556,4 @@ export async function generateText(prompt: string, systemPrompt?: string, option
     });
     throw failure;
   }
-}
-
-/**
- * Generates vector embeddings for a string or string array using local Ollama.
- * Returns a normalized EMBEDDING_DIMENSIONS (1536) dimensional array compatible
- * with the Supabase pgvector schema.
- *
- * Never fabricates vectors: if embeddings cannot be generated, a typed
- * EmbeddingError is thrown (no deterministic pseudo-vectors, no zero padding).
- * Retryable failures (network, 5xx) are retried with backoff.
- */
-export async function generateEmbeddings(textInput: string | string[]): Promise<number[]> {
-  const text = Array.isArray(textInput) ? textInput.join(' ') : textInput;
-  const cleanText = text.trim();
-
-  if (!cleanText) {
-    throw new EmbeddingError('embedding_empty_input', 'Cannot embed empty text: no input provided', { retryable: false });
-  }
-
-  const model = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
-  let lastError: EmbeddingError | undefined;
-
-  for (let attempt = 0; attempt <= CONFIG.maxRetries; attempt++) {
-    const startedAt = Date.now();
-    try {
-      const rawVector = await withTimeout(timeoutFor('ollama'), async (signal) => {
-        const res = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal,
-          body: JSON.stringify({ model, prompt: cleanText }),
-        });
-        if (!res.ok) {
-          const detail = (await readErrorBody(res)).slice(0, 200);
-          const retryable = res.status === 429 ? false : res.status >= 500;
-          throw new EmbeddingError(
-            'embedding_provider_http_error',
-            `Ollama embeddings returned HTTP ${res.status} ${res.statusText}${detail ? `: ${detail}` : ''}`,
-            { status: res.status, retryable }
-          );
-        }
-        const data = await res.json();
-        const embedding: unknown = data.embedding ?? data.embeddings?.[0];
-        if (!Array.isArray(embedding) || embedding.length === 0) {
-          throw new EmbeddingError('embedding_invalid_response', 'Ollama returned an empty embedding', { retryable: false });
-        }
-        return embedding as number[];
-      });
-
-      if (!rawVector.every((value) => typeof value === 'number' && Number.isFinite(value))) {
-        throw new EmbeddingError('embedding_invalid_response', 'Ollama returned a non-numeric embedding', { retryable: false });
-      }
-      if (rawVector.length !== EMBEDDING_DIMENSIONS) {
-        throw new EmbeddingError(
-          'embedding_dimension_mismatch',
-          `Embedding dimension ${rawVector.length} does not match required ${EMBEDDING_DIMENSIONS}; refusing to pad or truncate vectors`,
-          { dimensions: rawVector.length, retryable: false }
-        );
-      }
-
-      logger.info('ai_embedding_success', {
-        provider: 'ollama',
-        model,
-        dimensions: rawVector.length,
-        attempt,
-        latencyMs: Date.now() - startedAt,
-      });
-      return rawVector;
-    } catch (err) {
-      lastError = normalizeEmbeddingFailure(err);
-      logger.warn('ai_embedding_failure', {
-        provider: 'ollama',
-        model,
-        attempt,
-        latencyMs: Date.now() - startedAt,
-        code: lastError.code,
-        status: lastError.status,
-        retryable: lastError.retryable,
-        message: lastError.message,
-      });
-      if (!lastError.retryable || attempt >= CONFIG.maxRetries) throw lastError;
-      await sleep(backoffDelayMs(attempt));
-    }
-  }
-
-  throw lastError;
 }

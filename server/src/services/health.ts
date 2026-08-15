@@ -125,6 +125,16 @@ export function checkAIProviderConfigured(): Promise<boolean> {
   return Promise.resolve(hasProviderKey || ollamaEnabled);
 }
 
+export async function checkEmbeddingProvider(timeoutMs = 2500): Promise<boolean> {
+  try {
+    const { getEmbeddingProvider } = await import('./embeddingProvider.js');
+    const provider = getEmbeddingProvider();
+    return await withTimeout(timeoutMs, provider.healthCheck());
+  } catch {
+    return false;
+  }
+}
+
 export async function checkTemporalConnectivity(address?: string, timeoutMs = 2500): Promise<boolean> {
   const temporalAddress = address || process.env.TEMPORAL_ADDRESS || 'localhost:7233';
   try {

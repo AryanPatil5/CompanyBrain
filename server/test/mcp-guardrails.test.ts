@@ -373,12 +373,17 @@ export async function runMcpGuardrailsTestSuite() {
 
   // ─── Test 20: Embedding generation never fabricates pseudo-vectors ───
   try {
-    const { generateEmbeddings, EmbeddingError } = await import('../src/services/aiProvider.js');
+    const { generateEmbedding } = await import('../src/services/embeddings.js');
+    const { EmbeddingError, EMBEDDING_DIMENSIONS } = await import('../src/services/aiProvider.js');
+    const { getEmbeddingProvider, setEmbeddingProviderForTest } = await import('../src/services/embeddingProvider.js');
+    const priorProvider = process.env.EMBEDDING_PROVIDER;
 
-    // Contract: empty input must throw a typed error, never return zero vectors.
+    // Contract: empty input must NOT fabricate a vector — the provider-level
+    // call throws a typed error, and the pipeline API returns null (never a
+    // zero/deterministic vector).
     let emptyThrew: unknown = null;
     try {
-      await generateEmbeddings('');
+      await getEmbeddingProvider().embed('');
     } catch (err) {
       emptyThrew = err;
     }
@@ -389,15 +394,21 @@ export async function runMcpGuardrailsTestSuite() {
       console.error("❌ TEST 20a FAILED: Empty input did not throw EmbeddingError!", emptyThrew);
       failed++;
     }
+    const emptyResult = await generateEmbedding('');
+    if (emptyResult === null) {
+      console.log("✅ TEST 20a2 PASSED: generateEmbedding('') returns null — no fabricated vector.");
+      passed++;
+    } else {
+      console.error("❌ TEST 20a2 FAILED: generateEmbedding('') did not return null!", emptyResult);
+      failed++;
+    }
 
-    // Contract: with no reachable embedding provider, generation must fail
-    // loudly with a typed error — never silently return a deterministic
-    // pseudo-vector. If a real provider is available it must return a genuine
-    // 1536-dim vector.
-    let vector: number[] | undefined;
+    // Contract: with a reachable (mocked) provider, generation returns a real
+    // vector with the exact required dimension — never a fabricated one.
+    let vector: number[] | null = null;
     let threw: unknown = null;
     try {
-      vector = await generateEmbeddings("test embedding string");
+      vector = await generateEmbedding("test embedding string");
     } catch (err) {
       threw = err;
     }
@@ -408,13 +419,36 @@ export async function runMcpGuardrailsTestSuite() {
     } else if (threw !== null) {
       console.error("❌ TEST 20b FAILED: Embedding failure threw a non-typed error!", threw);
       failed++;
-    } else if (Array.isArray(vector) && vector.length === 1536) {
+    } else if (Array.isArray(vector) && vector.length === EMBEDDING_DIMENSIONS) {
       console.log("✅ TEST 20b PASSED: Real embedding provider returned genuine 1536-dim vector.");
       passed++;
     } else {
       console.error("❌ TEST 20b FAILED: Vector embedding generation failed or dimension mismatch!", vector?.length);
       failed++;
     }
+
+    // Contract: an unknown EMBEDDING_PROVIDER fails loudly with a typed
+    // configuration error, never a silent fabricated fallback.
+    let configThrew: unknown = null;
+    try {
+      process.env.EMBEDDING_PROVIDER = 'not-a-real-provider';
+      setEmbeddingProviderForTest(null);
+      await generateEmbedding('config probe');
+    } catch (err) {
+      configThrew = err;
+    }
+    if (configThrew instanceof EmbeddingError && configThrew.code === 'embedding_provider_config_error') {
+      console.log("✅ TEST 20c PASSED: Unknown EMBEDDING_PROVIDER throws typed config error.");
+      passed++;
+    } else {
+      console.error("❌ TEST 20c FAILED: Unknown provider did not throw typed config error!", configThrew);
+      failed++;
+    }
+
+    // Restore the harness default so later tests see the standard provider.
+    if (priorProvider === undefined) delete process.env.EMBEDDING_PROVIDER;
+    else process.env.EMBEDDING_PROVIDER = priorProvider;
+    setEmbeddingProviderForTest(null);
   } catch (err) {
     console.error("❌ TEST 20 EXCEPTION:", err);
     failed++;

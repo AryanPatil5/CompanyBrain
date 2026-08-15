@@ -1,11 +1,10 @@
 import { logger } from '../logger.js';
-import dotenv from 'dotenv';
-import { generateEmbeddings as getAiEmbeddings, EmbeddingError } from './aiProvider.js';
+import { EmbeddingError } from './aiProvider.js';
 import { supabase } from '../config/supabase.js';
-
-dotenv.config();
+import { getEmbeddingProvider, EmbeddingResult } from './embeddingProvider.js';
 
 export { EmbeddingError };
+export type { EmbeddingResult };
 
 export interface DLACSearchResult {
   id: string;
@@ -31,39 +30,73 @@ export interface DLACSearchResult {
  * typed EmbeddingError — failures never silently degrade to null or fake vectors.
  */
 export async function generateEmbedding(text: string): Promise<number[] | null> {
+  const result = await generateEmbeddingResult(text);
+  return result?.vector ?? null;
+}
+
+/**
+ * Like generateEmbedding, but returns the full provider result — vector plus
+ * the exact model/version metadata the provider reported for THAT vector.
+ * Callers that persist embeddings (document_chunks) MUST use this so the rows
+ * carry provider-returned metadata instead of env-derived guesses.
+ */
+export async function generateEmbeddingResult(text: string): Promise<EmbeddingResult | null> {
   const cleanText = text.trim();
   if (!cleanText) return null;
-  return getAiEmbeddings(cleanText);
+  return getEmbeddingProvider().embed(cleanText);
 }
 
 /**
  * Phase 3: bounded-concurrency embedding batching for document pipelines.
  *
- * The provider exposes no true batch API (generateEmbeddings joins array
- * input into ONE vector), so "batching" means running per-text calls with a
- * bounded concurrency pool instead of a serial loop. Semantics are identical
- * to the serial path: any failure throws the typed EmbeddingError AFTER the
- * caller's recordEmbeddingFailure hook (callers choose where to record);
- * nulls are returned only for empty inputs. Order is preserved.
+ * The provider exposes embedBatch for true batch APIs; if not available,
+ * falls back to running per-text calls with a bounded concurrency pool instead
+ * of a serial loop. Semantics are identical to the serial path: any failure
+ * throws the typed EmbeddingError AFTER the caller's recordEmbeddingFailure
+ * hook (callers choose where to record); nulls are returned only for empty
+ * inputs. Order is preserved.
  */
 export async function generateEmbeddingsBatch(
   texts: string[],
-  opts: { concurrency?: number } = {}
+  _opts: { concurrency?: number } = {}
 ): Promise<(number[] | null)[]> {
-  const concurrency = Math.max(1, opts.concurrency ?? 4);
-  const out: (number[] | null)[] = new Array(texts.length);
-  let cursor = 0;
+  const results = await generateEmbeddingResultsBatch(texts);
+  return results.map((r) => r?.vector ?? null);
+}
 
-  async function worker(): Promise<void> {
-    while (cursor < texts.length) {
-      const idx = cursor;
-      cursor += 1;
-      out[idx] = await generateEmbedding(texts[idx]);
+/**
+ * Batch variant of generateEmbeddingResult: returns provider metadata for each
+ * non-empty input so persistence can record exactly which model/version
+ * produced each vector. Null positions correspond to empty inputs.
+ */
+export async function generateEmbeddingResultsBatch(texts: string[]): Promise<(EmbeddingResult | null)[]> {
+  const provider = getEmbeddingProvider();
+  const cleanTexts = texts.map((t) => t.trim());
+
+  const emptyIndices = new Set<number>();
+  const nonEmptyTexts: { index: number; text: string }[] = [];
+
+  for (let i = 0; i < cleanTexts.length; i++) {
+    if (!cleanTexts[i]) {
+      emptyIndices.add(i);
+    } else {
+      nonEmptyTexts.push({ index: i, text: cleanTexts[i] });
     }
   }
 
-  const workers = Array.from({ length: Math.min(concurrency, Math.max(texts.length, 1)) }, () => worker());
-  await Promise.all(workers);
+  if (nonEmptyTexts.length === 0) {
+    return cleanTexts.map(() => null);
+  }
+
+  const nonEmptyResults = await provider.embedBatch(nonEmptyTexts.map((t) => t.text));
+
+  const out: (EmbeddingResult | null)[] = new Array(texts.length);
+  for (const idx of emptyIndices) {
+    out[idx] = null;
+  }
+  for (let i = 0; i < nonEmptyTexts.length; i++) {
+    out[nonEmptyTexts[i].index] = nonEmptyResults[i];
+  }
   return out;
 }
 
